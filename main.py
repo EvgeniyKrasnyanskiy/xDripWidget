@@ -272,6 +272,9 @@ async def post_devicestatus(request: Request):
     if isinstance(body, dict):
         body = [body]
 
+    # DEBUG: log raw payload so we can inspect what xDrip+ / AAPS actually sends
+    log.debug("devicestatus raw payload: %s", body)
+
     conn = get_db()
     inserted = 0
     try:
