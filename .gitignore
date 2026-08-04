@@ -37,3 +37,8 @@ desktop.ini
 
 # Logs
 *.log
+
+# PyInstaller build artifacts
+build/
+dist/
+*.spec

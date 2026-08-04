@@ -3,6 +3,15 @@ Glycemia Desktop Widget — PyQt6
 Always-on-top translucent overlay, polls /api/v1/current every 60 s.
 Works on Windows, macOS and Linux.
 
+Features:
+  - Graphical battery bar indicator (horizontal, colored fill)
+  - IoB kept in data but hidden from display
+  - Glucose alerts: hypo < 4.5, hyper > 9.0, critical > 14.0 mmol/L
+  - 1-hour cooldown per alert type
+  - Single-instance protection via QLocalServer
+  - Opacity control in settings (live preview)
+  - "About" dialog
+
 Requirements: widget_requirements.txt
 """
 
@@ -21,7 +30,18 @@ from PyQt6.QtCore import (
     QTimer,
     pyqtSignal,
 )
-from PyQt6.QtGui import QAction, QColor, QFont, QFontDatabase, QPainter, QPainterPath
+from PyQt6.QtGui import (
+    QAction,
+    QBrush,
+    QColor,
+    QFont,
+    QIcon,
+    QPainter,
+    QPainterPath,
+    QPen,
+    QPixmap,
+)
+from PyQt6.QtNetwork import QLocalServer, QLocalSocket
 from PyQt6.QtWidgets import (
     QApplication,
     QDialog,
@@ -33,43 +53,45 @@ from PyQt6.QtWidgets import (
     QMenu,
     QSlider,
     QSystemTrayIcon,
+    QTextBrowser,
     QVBoxLayout,
     QWidget,
 )
 
-try:
-    from PyQt6.QtGui import QIcon
-    import importlib.resources as _ir
-    _HAS_ICON = False  # set True if you add an .ico file
-except ImportError:
-    _HAS_ICON = False
-
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-APP_NAME = "xDrip Widget"
-ORG_NAME = "xdripwidget"
-DEFAULT_URL = "http://localhost:8080"
-POLL_INTERVAL_MS = 60_000  # 60 seconds
+APP_NAME    = "xDrip Widget"
+APP_VERSION = "1.2.0"
+ORG_NAME    = "xdripwidget"
+INSTANCE_KEY = "xDripWidgetSingleInstance"
+DEFAULT_URL  = "http://localhost:8080"
+POLL_INTERVAL_MS = 60_000   # 60 s
+ALERT_COOLDOWN_S = 3_600    # 1 h between same-type alerts
 
 # Thresholds (mmol/L)
-HYPO_SEVERE = 3.3
-HYPO_MILD = 3.9
-HYPER_MILD = 9.0
+HYPO_SEVERE  = 3.3
+HYPO_MILD    = 3.9
+HYPER_MILD   = 9.0
 HYPER_SEVERE = 11.0
 STALE_MINUTES = 15
 
-TREND_ARROWS = {
-    "DoubleUp": "⇈",
-    "SingleUp": "↑",
-    "FortyFiveUp": "↗",
-    "Flat": "→",
-    "FortyFiveDown": "↘",
-    "SingleDown": "↓",
-    "DoubleDown": "⇊",
-    "NOT COMPUTABLE": "?",
+# Alert thresholds
+ALERT_HYPO      = 4.5
+ALERT_HYPER     = 9.0
+ALERT_CRITICAL  = 14.0
+
+TREND_ARROWS: dict[str, str] = {
+    "DoubleUp":          "⇈",
+    "SingleUp":          "↑",
+    "FortyFiveUp":       "↗",
+    "Flat":              "→",
+    "FortyFiveDown":     "↘",
+    "SingleDown":        "↓",
+    "DoubleDown":        "⇊",
+    "NOT COMPUTABLE":    "?",
     "RATE OUT OF RANGE": "⚡",
-    "Unknown": "?",
+    "Unknown":           "?",
 }
 
 # ---------------------------------------------------------------------------
@@ -79,8 +101,7 @@ COLOR_GREEN  = QColor("#27ae60")
 COLOR_YELLOW = QColor("#f39c12")
 COLOR_RED    = QColor("#e74c3c")
 COLOR_GRAY   = QColor("#7f8c8d")
-COLOR_BG     = QColor(20, 20, 30, 210)     # dark translucent
-COLOR_TEXT   = QColor("#ecf0f1")
+COLOR_BG     = QColor(20, 20, 30, 210)
 COLOR_SUB    = QColor("#bdc3c7")
 
 
@@ -95,7 +116,6 @@ def glucose_color(mmol: float, stale: bool) -> QColor:
 
 
 def battery_color(pct: int) -> QColor:
-    """Color for battery percentage indicator."""
     if pct < 0:
         return COLOR_GRAY
     if pct <= 20:
@@ -106,15 +126,15 @@ def battery_color(pct: int) -> QColor:
 
 
 # ---------------------------------------------------------------------------
-# Worker thread — fetches data without blocking UI
+# Worker thread
 # ---------------------------------------------------------------------------
 class FetchWorker(QThread):
-    data_ready = pyqtSignal(dict)
+    data_ready  = pyqtSignal(dict)
     fetch_error = pyqtSignal(str)
 
     def __init__(self, base_url: str, api_secret: str = ""):
         super().__init__()
-        self._base_url = base_url
+        self._base_url   = base_url
         self._api_secret = api_secret
 
     def run(self):
@@ -124,8 +144,7 @@ class FetchWorker(QThread):
         try:
             req = urllib.request.Request(url, headers={"Accept": "application/json"})
             with urllib.request.urlopen(req, timeout=10) as resp:
-                raw = resp.read().decode()
-                data = json.loads(raw)
+                data = json.loads(resp.read().decode())
             self.data_ready.emit(data)
         except urllib.error.HTTPError as e:
             self.fetch_error.emit(f"HTTP {e.code}")
@@ -143,13 +162,12 @@ class SettingsDialog(QDialog):
         self.setModal(True)
         self.resize(360, 185)
 
-        settings = QSettings(ORG_NAME, APP_NAME)
-        self._url_edit = QLineEdit(settings.value("server_url", DEFAULT_URL))
-        self._secret_edit = QLineEdit(settings.value("api_secret", ""))
+        s = QSettings(ORG_NAME, APP_NAME)
+        self._url_edit    = QLineEdit(s.value("server_url", DEFAULT_URL))
+        self._secret_edit = QLineEdit(s.value("api_secret", ""))
         self._secret_edit.setEchoMode(QLineEdit.EchoMode.Password)
 
-        # Opacity slider (30% – 100%)
-        opacity_val = int(settings.value("opacity", 90))
+        opacity_val = int(s.value("opacity", 90))
         self._opacity_slider = QSlider(Qt.Orientation.Horizontal)
         self._opacity_slider.setRange(30, 100)
         self._opacity_slider.setValue(opacity_val)
@@ -165,7 +183,7 @@ class SettingsDialog(QDialog):
 
         form = QFormLayout()
         form.addRow("URL сервера:", self._url_edit)
-        form.addRow("API Secret:", self._secret_edit)
+        form.addRow("API Secret:",  self._secret_edit)
         form.addRow("Прозрачность:", opacity_row)
 
         buttons = QDialogButtonBox(
@@ -180,16 +198,53 @@ class SettingsDialog(QDialog):
 
     def _on_opacity_change(self, value: int):
         self._opacity_label.setText(f"{value}%")
-        # Live preview: apply to parent widget immediately
         if self.parent():
             self.parent().setWindowOpacity(value / 100.0)
 
     def _save(self):
-        settings = QSettings(ORG_NAME, APP_NAME)
-        settings.setValue("server_url", self._url_edit.text().strip())
-        settings.setValue("api_secret", self._secret_edit.text().strip())
-        settings.setValue("opacity", self._opacity_slider.value())
+        s = QSettings(ORG_NAME, APP_NAME)
+        s.setValue("server_url", self._url_edit.text().strip())
+        s.setValue("api_secret",  self._secret_edit.text().strip())
+        s.setValue("opacity",     self._opacity_slider.value())
         self.accept()
+
+
+# ---------------------------------------------------------------------------
+# About dialog
+# ---------------------------------------------------------------------------
+class AboutDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("О программе")
+        self.setModal(True)
+        self.resize(350, 240)
+
+        text = QTextBrowser()
+        text.setOpenExternalLinks(True)
+        text.setHtml(f"""
+            <h2 style="margin:0 0 4px 0">{APP_NAME} &nbsp; v{APP_VERSION}</h2>
+            <p style="margin:0 0 8px 0; color:#888">
+                Ультра-лёгкий десктопный виджет мониторинга глюкозы крови.
+            </p>
+            <p><b>Совместим с:</b> xDrip+, AAPS (AndroidAPS)<br>
+               <b>Протокол:</b> Nightscout REST API<br>
+               <b>Обновление:</b> каждые 60 секунд</p>
+            <p><b>Пороги оповещений:</b><br>
+               🔴 Гипо:&nbsp;&nbsp;&nbsp;&nbsp; &lt; {ALERT_HYPO} ммоль/л<br>
+               🟡 Гипер:&nbsp;&nbsp;&nbsp; &gt; {ALERT_HYPER} ммоль/л<br>
+               ⛔ Критично: &gt; {ALERT_CRITICAL} ммоль/л<br>
+               <i>Повтор не чаще 1 раза в час.</i></p>
+            <p><a href="https://github.com/EvgeniyKrasnyanskiy/xDripWidget">
+               ⬡ GitHub: EvgeniyKrasnyanskiy/xDripWidget</a></p>
+        """)
+        text.setReadOnly(True)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok)
+        buttons.accepted.connect(self.accept)
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(text)
+        layout.addWidget(buttons)
 
 
 # ---------------------------------------------------------------------------
@@ -202,6 +257,7 @@ class GlucoseWidget(QWidget):
         self._data: Optional[dict] = None
         self._error: Optional[str] = None
         self._worker: Optional[FetchWorker] = None
+        self._last_alerts: dict[str, float] = {}  # alert_key → unix timestamp
 
         self._setup_ui()
         self._setup_tray()
@@ -220,55 +276,55 @@ class GlucoseWidget(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setFixedSize(220, 100)
 
-        settings = QSettings(ORG_NAME, APP_NAME)
-        pos = settings.value("position", QPoint(100, 100))
-        self.move(pos)
+        s = QSettings(ORG_NAME, APP_NAME)
+        self.move(s.value("position", QPoint(100, 100)))
+        self.setWindowOpacity(int(s.value("opacity", 90)) / 100.0)
 
-        # Restore saved opacity
-        opacity = int(settings.value("opacity", 90))
-        self.setWindowOpacity(opacity / 100.0)
-
-        # Load system font
-        font_id = QFontDatabase.addApplicationFont("")  # use system
-        self._font_big = QFont("Segoe UI", 30, QFont.Weight.Bold)
+        self._font_big = QFont("Segoe UI", 28, QFont.Weight.Bold)
         self._font_med = QFont("Segoe UI", 12, QFont.Weight.Normal)
-        self._font_sml = QFont("Segoe UI", 9, QFont.Weight.Normal)
+        self._font_sml = QFont("Segoe UI",  9, QFont.Weight.Normal)
 
     # ------------------------------------------------------------------
     # Tray icon
     # ------------------------------------------------------------------
     def _setup_tray(self):
         self._tray = QSystemTrayIcon(self)
-        # Minimal programmatic icon (a colored square)
-        from PyQt6.QtGui import QPixmap
         px = QPixmap(16, 16)
         px.fill(COLOR_GREEN)
         self._tray.setIcon(QIcon(px))
         self._tray.setToolTip(APP_NAME)
-
-        menu = QMenu()
-        act_show = QAction("Показать / скрыть", self)
-        act_show.triggered.connect(self._toggle_visibility)
-        act_settings = QAction("Настройки…", self)
-        act_settings.triggered.connect(self._open_settings)
-        act_quit = QAction("Выход", self)
-        act_quit.triggered.connect(QApplication.quit)
-
-        menu.addAction(act_show)
-        menu.addSeparator()
-        menu.addAction(act_settings)
-        menu.addSeparator()
-        menu.addAction(act_quit)
-
-        self._tray.setContextMenu(menu)
+        self._tray.setContextMenu(self._build_tray_menu())
         self._tray.activated.connect(self._tray_activated)
         self._tray.show()
+
+    def _build_tray_menu(self) -> QMenu:
+        menu = QMenu()
+        for label, slot in [
+            ("Показать / скрыть", self._toggle_visibility),
+            ("Обновить сейчас",   self._fetch),
+        ]:
+            a = QAction(label, self)
+            a.triggered.connect(slot)
+            menu.addAction(a)
+        menu.addSeparator()
+        for label, slot in [
+            ("Настройки…",  self._open_settings),
+            ("О программе", self._open_about),
+        ]:
+            a = QAction(label, self)
+            a.triggered.connect(slot)
+            menu.addAction(a)
+        menu.addSeparator()
+        a_quit = QAction("Выход", self)
+        a_quit.triggered.connect(QApplication.quit)
+        menu.addAction(a_quit)
+        return menu
 
     # ------------------------------------------------------------------
     # Polling
     # ------------------------------------------------------------------
     def _start_polling(self):
-        self._fetch()  # immediate first load
+        self._fetch()
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._fetch)
         self._timer.start(POLL_INTERVAL_MS)
@@ -276,17 +332,18 @@ class GlucoseWidget(QWidget):
     def _fetch(self):
         if self._worker and self._worker.isRunning():
             return
-        settings = QSettings(ORG_NAME, APP_NAME)
-        url = settings.value("server_url", DEFAULT_URL)
-        secret = settings.value("api_secret", "")
+        s      = QSettings(ORG_NAME, APP_NAME)
+        url    = s.value("server_url", DEFAULT_URL)
+        secret = s.value("api_secret", "")
         self._worker = FetchWorker(url, secret)
         self._worker.data_ready.connect(self._on_data)
         self._worker.fetch_error.connect(self._on_error)
         self._worker.start()
 
     def _on_data(self, data: dict):
-        self._data = data
+        self._data  = data
         self._error = None
+        self._check_alerts(data)
         self.update()
         self._update_tray_tooltip()
 
@@ -295,13 +352,50 @@ class GlucoseWidget(QWidget):
         self.update()
 
     # ------------------------------------------------------------------
+    # Glucose alerts
+    # ------------------------------------------------------------------
+    def _check_alerts(self, data: dict):
+        mmol: float      = data.get("mmol", 0.0)
+        minutes_ago: int = data.get("minutes_ago", 999)
+
+        if minutes_ago > STALE_MINUTES:
+            return  # don't alert on stale data
+
+        now = time.time()
+
+        def can_alert(key: str) -> bool:
+            return (now - self._last_alerts.get(key, 0.0)) >= ALERT_COOLDOWN_S
+
+        if mmol > ALERT_CRITICAL and can_alert("critical"):
+            self._last_alerts["critical"] = now
+            self._tray.showMessage(
+                "⛔ Критически высокий сахар!",
+                f"{mmol:.1f} ммоль/л — немедленно примите меры!",
+                QSystemTrayIcon.MessageIcon.Critical, 12_000,
+            )
+        elif mmol > ALERT_HYPER and can_alert("hyper"):
+            self._last_alerts["hyper"] = now
+            self._tray.showMessage(
+                "🟡 Высокий сахар",
+                f"{mmol:.1f} ммоль/л — выше нормы.",
+                QSystemTrayIcon.MessageIcon.Warning, 8_000,
+            )
+        elif mmol < ALERT_HYPO and can_alert("hypo"):
+            self._last_alerts["hypo"] = now
+            self._tray.showMessage(
+                "🔴 Низкий сахар!",
+                f"{mmol:.1f} ммоль/л — опасная гипогликемия!",
+                QSystemTrayIcon.MessageIcon.Critical, 12_000,
+            )
+
+    # ------------------------------------------------------------------
     # Painting
     # ------------------------------------------------------------------
     def paintEvent(self, _event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        # Rounded background
+        # Rounded dark background
         path = QPainterPath()
         path.addRoundedRect(0, 0, self.width(), self.height(), 14, 14)
         painter.fillPath(path, COLOR_BG)
@@ -309,33 +403,32 @@ class GlucoseWidget(QWidget):
         if self._error or not self._data:
             painter.setPen(COLOR_GRAY)
             painter.setFont(self._font_med)
-            msg = self._error or "Загрузка…"
-            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, msg)
+            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter,
+                             self._error or "Загрузка…")
             return
 
         d = self._data
-        mmol: float = d.get("mmol", 0.0)
-        direction: str = d.get("direction", "Unknown")
-        delta: str = d.get("delta", "?")
-        iob: float = d.get("iob", 0.0)
-        battery: int = d.get("battery", -1)
-        minutes_ago: int = d.get("minutes_ago", 0)
+        mmol: float       = d.get("mmol", 0.0)
+        direction: str    = d.get("direction", "Unknown")
+        delta: str        = d.get("delta", "?")
+        # iob is intentionally NOT displayed but remains in data for future use
+        battery: int      = d.get("battery", -1)
+        minutes_ago: int  = d.get("minutes_ago", 0)
 
         stale = minutes_ago > STALE_MINUTES
         color = glucose_color(mmol, stale)
         arrow = TREND_ARROWS.get(direction, "?")
 
-        # --- Glucose + arrow (large) ---
+        # ── Glucose + arrow (large, right-aligned) ────────────────────
         painter.setPen(color)
         painter.setFont(self._font_big)
-        glucose_text = f"{mmol:.1f} {arrow}"
         painter.drawText(
-            0, 5, self.width() - 8, 55,
+            0, 5, self.width() - 6, 55,
             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
-            glucose_text,
+            f"{mmol:.1f} {arrow}",
         )
 
-        # --- Delta (medium) ---
+        # ── Delta (medium, left) ──────────────────────────────────────
         painter.setPen(COLOR_SUB)
         painter.setFont(self._font_med)
         painter.drawText(
@@ -344,44 +437,71 @@ class GlucoseWidget(QWidget):
             f"Δ {delta}",
         )
 
-        # --- Bottom row: IoB | 🔋battery | time ---
-        w = self.width()
-        col = w // 3   # each column width
-        painter.setFont(self._font_sml)
+        # ── Bottom row: [battery bar] | time ─────────────────────────
+        self._draw_battery_bar(painter, battery, stale)
 
-        # IoB (left column)
-        painter.setPen(COLOR_SUB)
-        painter.drawText(
-            4, 62, col - 4, 30,
-            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-            f"IoB {iob:.2f}U",
-        )
-
-        # Battery (center column)
-        bat_color = battery_color(battery)
-        painter.setPen(bat_color)
-        bat_text = f"🔋{battery}%" if battery >= 0 else "🔋 —"
-        painter.drawText(
-            col, 62, col, 30,
-            Qt.AlignmentFlag.AlignCenter,
-            bat_text,
-        )
-
-        # Time (right column)
         time_color = COLOR_GRAY if stale else COLOR_SUB
         painter.setPen(time_color)
+        painter.setFont(self._font_sml)
         painter.drawText(
-            col * 2, 62, col - 4, 30,
+            130, 62, 86, 30,
             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
             f"{minutes_ago}м назад" if minutes_ago < 60 else ">1ч назад",
         )
 
-        # Thin colored accent line on top
-        painter.setPen(color)
+        # ── Top accent line ───────────────────────────────────────────
+        painter.setPen(QPen(color, 2))
         painter.drawLine(14, 2, self.width() - 14, 2)
 
+    def _draw_battery_bar(self, painter: QPainter, pct: int, stale: bool):
+        """
+        Draw a horizontal battery icon with colored fill.
+        Layout: [  body  ][cap]  XX%
+                 x=6, w=72, h=14
+        """
+        BAR_X, BAR_Y = 6,  68
+        BAR_W, BAR_H = 72, 14
+        CAP_W, CAP_H = 4,   7
+        RADIUS = 2
+
+        b_color = COLOR_GRAY if (pct < 0 or stale) else battery_color(pct)
+
+        # Body outline
+        painter.setPen(QPen(COLOR_SUB, 1))
+        painter.setBrush(QBrush(Qt.BrushStyle.NoBrush))
+        painter.drawRoundedRect(BAR_X, BAR_Y, BAR_W, BAR_H, RADIUS, RADIUS)
+
+        # Colored fill
+        if pct > 0:
+            fill_w = max(2, int((BAR_W - 4) * min(pct, 100) / 100))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QBrush(b_color))
+            painter.drawRoundedRect(
+                BAR_X + 2, BAR_Y + 2,
+                fill_w, BAR_H - 4,
+                1, 1,
+            )
+
+        # Positive terminal cap (right side)
+        cap_x = BAR_X + BAR_W + 2
+        cap_y = BAR_Y + (BAR_H - CAP_H) // 2
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(COLOR_SUB))
+        painter.drawRoundedRect(cap_x, cap_y, CAP_W, CAP_H, 1, 1)
+
+        # Percentage label
+        label = f"{pct}%" if pct >= 0 else "—"
+        painter.setPen(b_color)
+        painter.setFont(self._font_sml)
+        painter.drawText(
+            BAR_X + BAR_W + CAP_W + 5, 62,
+            38, 30,
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            label,
+        )
+
     # ------------------------------------------------------------------
-    # Drag support
+    # Drag
     # ------------------------------------------------------------------
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -395,8 +515,7 @@ class GlucoseWidget(QWidget):
 
     def mouseReleaseEvent(self, _event):
         self._drag_pos = None
-        settings = QSettings(ORG_NAME, APP_NAME)
-        settings.setValue("position", self.pos())
+        QSettings(ORG_NAME, APP_NAME).setValue("position", self.pos())
 
     # ------------------------------------------------------------------
     # Context menu (right-click)
@@ -406,21 +525,24 @@ class GlucoseWidget(QWidget):
         menu.setWindowFlags(menu.windowFlags() | Qt.WindowType.FramelessWindowHint)
         menu.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
-        act_hide = QAction("Свернуть в трей", self)
-        act_hide.triggered.connect(self._hide_to_tray)
-        act_settings = QAction("Настройки…", self)
-        act_settings.triggered.connect(self._open_settings)
-        act_refresh = QAction("Обновить сейчас", self)
-        act_refresh.triggered.connect(self._fetch)
-        act_quit = QAction("Выход", self)
-        act_quit.triggered.connect(QApplication.quit)
+        entries = [
+            ("Обновить сейчас", self._fetch),
+            ("Свернуть в трей", self._hide_to_tray),
+            None,
+            ("Настройки…",      self._open_settings),
+            ("О программе",     self._open_about),
+            None,
+            ("Выход",           QApplication.quit),
+        ]
+        for item in entries:
+            if item is None:
+                menu.addSeparator()
+            else:
+                label, slot = item
+                a = QAction(label, self)
+                a.triggered.connect(slot)
+                menu.addAction(a)
 
-        menu.addAction(act_refresh)
-        menu.addAction(act_hide)
-        menu.addSeparator()
-        menu.addAction(act_settings)
-        menu.addSeparator()
-        menu.addAction(act_quit)
         menu.exec(global_pos)
 
     # ------------------------------------------------------------------
@@ -435,7 +557,10 @@ class GlucoseWidget(QWidget):
 
     def _hide_to_tray(self):
         self.hide()
-        self._tray.showMessage(APP_NAME, "Виджет свёрнут в трей", QSystemTrayIcon.MessageIcon.Information, 2000)
+        self._tray.showMessage(
+            APP_NAME, "Виджет свёрнут в трей",
+            QSystemTrayIcon.MessageIcon.Information, 2000,
+        )
 
     def _tray_activated(self, reason):
         if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
@@ -443,26 +568,50 @@ class GlucoseWidget(QWidget):
 
     def _open_settings(self):
         dlg = SettingsDialog(self)
-        if dlg.exec() == QDialog.DialogCode.Accepted:
-            # Apply saved opacity and reload data
-            settings = QSettings(ORG_NAME, APP_NAME)
-            self.setWindowOpacity(int(settings.value("opacity", 90)) / 100.0)
+        dlg.exec()
+        # Always restore the saved opacity (whether Ok or Cancel)
+        s = QSettings(ORG_NAME, APP_NAME)
+        self.setWindowOpacity(int(s.value("opacity", 90)) / 100.0)
+        if dlg.result() == QDialog.DialogCode.Accepted:
             self._fetch()
-        else:
-            # Restore opacity if user cancelled
-            settings = QSettings(ORG_NAME, APP_NAME)
-            self.setWindowOpacity(int(settings.value("opacity", 90)) / 100.0)
+
+    def _open_about(self):
+        AboutDialog(self).exec()
 
     def _update_tray_tooltip(self):
         if not self._data:
             return
         d = self._data
-        tip = f"{d.get('mmol', '?')} ммоль/л  {d.get('direction', '')}  {d.get('minutes_ago', '?')}м"
+        tip = (f"{d.get('mmol', '?')} ммоль/л  "
+               f"{TREND_ARROWS.get(d.get('direction', ''), '?')}  "
+               f"{d.get('minutes_ago', '?')}м назад")
         self._tray.setToolTip(f"{APP_NAME}\n{tip}")
 
     def closeEvent(self, event):
         event.ignore()
         self._hide_to_tray()
+
+
+# ---------------------------------------------------------------------------
+# Single-instance protection
+# ---------------------------------------------------------------------------
+def _ensure_single_instance() -> Optional[QLocalServer]:
+    """
+    Connect to existing instance → show notification and exit.
+    Otherwise → become the named server for future checks.
+    """
+    sock = QLocalSocket()
+    sock.connectToServer(INSTANCE_KEY)
+    if sock.waitForConnected(400):
+        sock.disconnectFromServer()
+        # Could send a "show" command here via socket if desired
+        print(f"{APP_NAME} is already running.")
+        sys.exit(0)
+
+    server = QLocalServer()
+    QLocalServer.removeServer(INSTANCE_KEY)  # clean up after crash
+    server.listen(INSTANCE_KEY)
+    return server
 
 
 # ---------------------------------------------------------------------------
@@ -473,6 +622,8 @@ def main():
     app.setApplicationName(APP_NAME)
     app.setOrganizationName(ORG_NAME)
     app.setQuitOnLastWindowClosed(False)
+
+    _server = _ensure_single_instance()  # keep reference alive for process lifetime
 
     widget = GlucoseWidget()
     widget.show()
