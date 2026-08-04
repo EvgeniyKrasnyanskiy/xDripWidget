@@ -4,7 +4,11 @@ Ultra-light: FastAPI + SQLite, target RAM usage < 20 MB.
 
 Endpoints:
   POST /api/v1/entries.json       — receive glucose from xDrip+
+  POST /api/v1/entries            — alias (no .json suffix)
   POST /api/v1/devicestatus.json  — receive IoB / CoB from AAPS
+  POST /api/v1/devicestatus       — alias (no .json suffix)
+  GET  /api/v1/status[.json]      — Nightscout status probe for xDrip+
+  GET  /api/v1/treatments[.json]  — stub: returns [] (required by xDrip+)
   GET  /api/v1/current            — latest reading for the desktop widget
   GET  /health                    — liveness probe
 """
@@ -200,6 +204,13 @@ def health():
     tags=["nightscout"],
     dependencies=[Depends(verify_api_key)],
 )
+@app.post(
+    "/api/v1/entries",
+    status_code=status.HTTP_200_OK,
+    tags=["nightscout"],
+    dependencies=[Depends(verify_api_key)],
+    include_in_schema=False,
+)
 async def post_entries(request: Request):
     """
     Nightscout-compatible entries endpoint.
@@ -248,6 +259,13 @@ async def post_entries(request: Request):
     tags=["nightscout"],
     dependencies=[Depends(verify_api_key)],
 )
+@app.post(
+    "/api/v1/devicestatus",
+    status_code=status.HTTP_200_OK,
+    tags=["nightscout"],
+    dependencies=[Depends(verify_api_key)],
+    include_in_schema=False,
+)
 async def post_devicestatus(request: Request):
     """Nightscout-compatible devicestatus endpoint (AAPS IoB / CoB)."""
     body = await request.json()
@@ -283,6 +301,25 @@ async def post_devicestatus(request: Request):
         conn.close()
 
     return {"saved": inserted}
+
+
+@app.get("/api/v1/status.json", tags=["nightscout"])
+@app.get("/api/v1/status", tags=["nightscout"], include_in_schema=False)
+def nightscout_status():
+    """Nightscout-compatible status endpoint — required by xDrip+ connection test."""
+    return {
+        "status": "ok",
+        "name": "Micro-Nightscout",
+        "version": "1.0.0",
+        "settings": {"units": "mmol"},
+    }
+
+
+@app.get("/api/v1/treatments", tags=["nightscout"])
+@app.get("/api/v1/treatments.json", tags=["nightscout"], include_in_schema=False)
+def get_treatments():
+    """Stub treatments endpoint — returns empty list so xDrip+ doesn't 404."""
+    return []
 
 
 @app.get("/api/v1/current", tags=["widget"])
