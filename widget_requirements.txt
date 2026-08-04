@@ -1,0 +1,2 @@
+# Desktop widget dependencies (Windows / macOS / Linux)
+PyQt6==6.9.1

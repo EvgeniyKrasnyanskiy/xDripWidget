@@ -1,0 +1,5 @@
+# Server-side dependencies (minimal for low RAM)
+fastapi==0.115.12
+uvicorn[standard]==0.34.3
+pydantic==2.11.7
+aiosqlite==0.21.0   # optional async driver, kept for future use
