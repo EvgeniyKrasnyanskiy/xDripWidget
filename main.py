@@ -73,12 +73,19 @@ def init_db() -> None:
                 id        INTEGER PRIMARY KEY AUTOINCREMENT,
                 iob       REAL    NOT NULL DEFAULT 0.0,
                 cob       REAL    NOT NULL DEFAULT 0.0,
+                battery   INTEGER NOT NULL DEFAULT -1,   -- phone battery %, -1 = unknown
                 timestamp INTEGER NOT NULL
             )
             """
         )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_entries_ts    ON entries(timestamp DESC)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_devstatus_ts  ON devicestatus(timestamp DESC)")
+        # --- migration: add battery column if upgrading from older schema ---
+        try:
+            conn.execute("ALTER TABLE devicestatus ADD COLUMN battery INTEGER NOT NULL DEFAULT -1")
+            log.info("Migration: added battery column to devicestatus")
+        except sqlite3.OperationalError:
+            pass  # column already exists
     conn.close()
     log.info("Database initialised at %s", DB_PATH)
 
@@ -272,7 +279,6 @@ async def post_devicestatus(request: Request):
     if isinstance(body, dict):
         body = [body]
 
-    # DEBUG: log raw payload so we can inspect what xDrip+ / AAPS actually sends
     log.debug("devicestatus raw payload: %s", body)
 
     conn = get_db()
@@ -286,6 +292,17 @@ async def post_devicestatus(request: Request):
                 iob = ds.iob or ds.IOB or 0.0
                 cob = ds.cob or ds.COB or 0.0
 
+                # parse phone battery from xDrip+ uploader field
+                battery = -1
+                uploader = raw.get("uploader", {})
+                if isinstance(uploader, dict):
+                    bat = uploader.get("battery")
+                    if bat is not None:
+                        try:
+                            battery = int(bat)
+                        except (TypeError, ValueError):
+                            pass
+
                 # try nested openaps structure
                 if iob == 0.0 and ds.openaps:
                     iob_data = ds.openaps.get("iob", {})
@@ -295,11 +312,11 @@ async def post_devicestatus(request: Request):
 
                 ts = int(time.time())
                 conn.execute(
-                    "INSERT INTO devicestatus (iob, cob, timestamp) VALUES (?, ?, ?)",
-                    (iob, cob, ts),
+                    "INSERT INTO devicestatus (iob, cob, battery, timestamp) VALUES (?, ?, ?, ?)",
+                    (iob, cob, battery, ts),
                 )
                 inserted += 1
-                log.info("DeviceStatus saved: IoB=%.2f CoB=%.2f", iob, cob)
+                log.info("DeviceStatus saved: IoB=%.2f CoB=%.2f Battery=%d%%", iob, cob, battery)
     finally:
         conn.close()
 
@@ -344,7 +361,7 @@ def get_current(
             "SELECT sgv, direction, timestamp FROM entries ORDER BY timestamp DESC LIMIT 2"
         ).fetchall()
         row_d = conn.execute(
-            "SELECT iob, cob FROM devicestatus ORDER BY timestamp DESC LIMIT 1"
+            "SELECT iob, cob, battery FROM devicestatus ORDER BY timestamp DESC LIMIT 1"
         ).fetchone()
     finally:
         conn.close()
@@ -364,6 +381,7 @@ def get_current(
 
     iob = round(float(row_d["iob"]), 2) if row_d else 0.0
     cob = round(float(row_d["cob"]), 2) if row_d else 0.0
+    battery = int(row_d["battery"]) if row_d else -1
 
     return {
         "mmol": _to_mmol(latest["sgv"]),
@@ -372,6 +390,7 @@ def get_current(
         "delta": delta_str,
         "iob": iob,
         "cob": cob,
+        "battery": battery,
         "minutes_ago": minutes_ago,
         "timestamp": latest["timestamp"],
     }

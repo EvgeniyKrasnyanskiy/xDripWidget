@@ -27,9 +27,11 @@ from PyQt6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
     QMenu,
+    QSlider,
     QSystemTrayIcon,
     QVBoxLayout,
     QWidget,
@@ -92,6 +94,17 @@ def glucose_color(mmol: float, stale: bool) -> QColor:
     return COLOR_GREEN
 
 
+def battery_color(pct: int) -> QColor:
+    """Color for battery percentage indicator."""
+    if pct < 0:
+        return COLOR_GRAY
+    if pct <= 20:
+        return COLOR_RED
+    if pct <= 50:
+        return COLOR_YELLOW
+    return COLOR_GREEN
+
+
 # ---------------------------------------------------------------------------
 # Worker thread — fetches data without blocking UI
 # ---------------------------------------------------------------------------
@@ -128,16 +141,32 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Настройки виджета")
         self.setModal(True)
-        self.resize(340, 140)
+        self.resize(360, 185)
 
         settings = QSettings(ORG_NAME, APP_NAME)
         self._url_edit = QLineEdit(settings.value("server_url", DEFAULT_URL))
         self._secret_edit = QLineEdit(settings.value("api_secret", ""))
         self._secret_edit.setEchoMode(QLineEdit.EchoMode.Password)
 
+        # Opacity slider (30% – 100%)
+        opacity_val = int(settings.value("opacity", 90))
+        self._opacity_slider = QSlider(Qt.Orientation.Horizontal)
+        self._opacity_slider.setRange(30, 100)
+        self._opacity_slider.setValue(opacity_val)
+        self._opacity_slider.setTickInterval(10)
+        self._opacity_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
+        self._opacity_label = QLabel(f"{opacity_val}%")
+        self._opacity_label.setMinimumWidth(36)
+        self._opacity_slider.valueChanged.connect(self._on_opacity_change)
+
+        opacity_row = QHBoxLayout()
+        opacity_row.addWidget(self._opacity_slider)
+        opacity_row.addWidget(self._opacity_label)
+
         form = QFormLayout()
         form.addRow("URL сервера:", self._url_edit)
         form.addRow("API Secret:", self._secret_edit)
+        form.addRow("Прозрачность:", opacity_row)
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
@@ -149,10 +178,17 @@ class SettingsDialog(QDialog):
         layout.addLayout(form)
         layout.addWidget(buttons)
 
+    def _on_opacity_change(self, value: int):
+        self._opacity_label.setText(f"{value}%")
+        # Live preview: apply to parent widget immediately
+        if self.parent():
+            self.parent().setWindowOpacity(value / 100.0)
+
     def _save(self):
         settings = QSettings(ORG_NAME, APP_NAME)
         settings.setValue("server_url", self._url_edit.text().strip())
         settings.setValue("api_secret", self._secret_edit.text().strip())
+        settings.setValue("opacity", self._opacity_slider.value())
         self.accept()
 
 
@@ -187,6 +223,10 @@ class GlucoseWidget(QWidget):
         settings = QSettings(ORG_NAME, APP_NAME)
         pos = settings.value("position", QPoint(100, 100))
         self.move(pos)
+
+        # Restore saved opacity
+        opacity = int(settings.value("opacity", 90))
+        self.setWindowOpacity(opacity / 100.0)
 
         # Load system font
         font_id = QFontDatabase.addApplicationFont("")  # use system
@@ -278,6 +318,7 @@ class GlucoseWidget(QWidget):
         direction: str = d.get("direction", "Unknown")
         delta: str = d.get("delta", "?")
         iob: float = d.get("iob", 0.0)
+        battery: int = d.get("battery", -1)
         minutes_ago: int = d.get("minutes_ago", 0)
 
         stale = minutes_ago > STALE_MINUTES
@@ -303,18 +344,34 @@ class GlucoseWidget(QWidget):
             f"Δ {delta}",
         )
 
-        # --- IoB + time (small bottom row) ---
+        # --- Bottom row: IoB | 🔋battery | time ---
+        w = self.width()
+        col = w // 3   # each column width
         painter.setFont(self._font_sml)
+
+        # IoB (left column)
         painter.setPen(COLOR_SUB)
         painter.drawText(
-            8, 62, self.width() // 2, 30,
+            4, 62, col - 4, 30,
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
             f"IoB {iob:.2f}U",
         )
+
+        # Battery (center column)
+        bat_color = battery_color(battery)
+        painter.setPen(bat_color)
+        bat_text = f"🔋{battery}%" if battery >= 0 else "🔋 —"
+        painter.drawText(
+            col, 62, col, 30,
+            Qt.AlignmentFlag.AlignCenter,
+            bat_text,
+        )
+
+        # Time (right column)
         time_color = COLOR_GRAY if stale else COLOR_SUB
         painter.setPen(time_color)
         painter.drawText(
-            self.width() // 2, 62, self.width() // 2 - 8, 30,
+            col * 2, 62, col - 4, 30,
             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
             f"{minutes_ago}м назад" if minutes_ago < 60 else ">1ч назад",
         )
@@ -387,7 +444,14 @@ class GlucoseWidget(QWidget):
     def _open_settings(self):
         dlg = SettingsDialog(self)
         if dlg.exec() == QDialog.DialogCode.Accepted:
-            self._fetch()  # reload with new settings
+            # Apply saved opacity and reload data
+            settings = QSettings(ORG_NAME, APP_NAME)
+            self.setWindowOpacity(int(settings.value("opacity", 90)) / 100.0)
+            self._fetch()
+        else:
+            # Restore opacity if user cancelled
+            settings = QSettings(ORG_NAME, APP_NAME)
+            self.setWindowOpacity(int(settings.value("opacity", 90)) / 100.0)
 
     def _update_tray_tooltip(self):
         if not self._data:
