@@ -122,7 +122,7 @@ logger.info("=================== xDrip Widget Initializing ===================")
 # Constants
 # ---------------------------------------------------------------------------
 APP_NAME     = "xDrip Widget"
-APP_VERSION  = "1.5.0"
+APP_VERSION  = "1.5.1"
 ORG_NAME     = "xdripwidget"
 INSTANCE_KEY = "xDripWidgetSingleInstance"
 DEFAULT_URL  = "http://localhost:8080"
@@ -409,16 +409,24 @@ class TreatmentDialog(QDialog):
             self._carbs_spin.setEnabled(False)
             self._carbs_spin.setValue(0)
             self._insulin_spin.setEnabled(True)
-            self._glucose_spin.setEnabled(True)
-        else:  # Meal Bolus / Carb Intake
+            self._glucose_spin.setEnabled(False)
+            self._glucose_spin.setValue(0)
+        elif event_type == "Carb Intake":
+            self._carbs_spin.setEnabled(True)
+            self._insulin_spin.setEnabled(False)
+            self._insulin_spin.setValue(0)
+            self._glucose_spin.setEnabled(False)
+            self._glucose_spin.setValue(0)
+        else:  # Meal Bolus
             self._carbs_spin.setEnabled(True)
             self._insulin_spin.setEnabled(True)
-            self._glucose_spin.setEnabled(True)
+            self._glucose_spin.setEnabled(False)
+            self._glucose_spin.setValue(0)
 
     def _submit(self):
-        carbs   = self._carbs_spin.value()
-        insulin = self._insulin_spin.value()
-        glucose = self._glucose_spin.value()
+        carbs   = self._carbs_spin.value() if self._carbs_spin.isEnabled() else 0.0
+        insulin = self._insulin_spin.value() if self._insulin_spin.isEnabled() else 0.0
+        glucose = self._glucose_spin.value() if self._glucose_spin.isEnabled() else 0.0
         event_label = self._event_type_combo.currentText()
         event_type = EVENT_TYPES_MAP.get(event_label, "Meal Bolus")
         notes = self._notes_edit.text().strip()
@@ -445,7 +453,7 @@ class TreatmentDialog(QDialog):
             "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(ts)),
             "date": ts * 1000,
         }
-        if glucose > 0:
+        if self._glucose_spin.isEnabled() and glucose > 0:
             payload["glucose"] = glucose
             payload["units"] = "mmol"
 

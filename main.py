@@ -539,6 +539,11 @@ def get_treatments(request: Request, limit: int = 50):
 
 
 def _mark_voided(conn: sqlite3.Connection, tid: str) -> int:
+    row = conn.execute("SELECT timestamp, glucose FROM treatments WHERE uuid = ? OR id = ?", (tid, tid)).fetchone()
+    if row and row["timestamp"]:
+        ts = row["timestamp"]
+        conn.execute("DELETE FROM entries WHERE type = 'mbg' AND timestamp >= ? AND timestamp <= ?", (ts - 10, ts + 10))
+
     cur = conn.execute(
         "UPDATE treatments SET is_voided = 1, eventType = 'Void', carbs = 0.0, insulin = 0.0, notes = 'Voided' WHERE uuid = ? OR id = ?",
         (tid, tid),
