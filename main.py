@@ -105,6 +105,11 @@ def init_db() -> None:
         except sqlite3.OperationalError:
             pass
         try:
+            conn.execute("DELETE FROM entries WHERE type = 'mbg'")
+            log.info("Migration: cleaned up mbg entries from entries table")
+        except sqlite3.OperationalError:
+            pass
+        try:
             conn.execute("ALTER TABLE devicestatus ADD COLUMN battery INTEGER NOT NULL DEFAULT -1")
             log.info("Migration: added battery column to devicestatus")
         except sqlite3.OperationalError:
@@ -592,13 +597,6 @@ async def post_treatments(request: Request):
                     item_uuid, t.eventType, t.insulin, t.carbs,
                     f"{glucose_mgdl:.1f}mg/dL" if glucose_mgdl else "—", ts
                 )
-
-                if glucose_mgdl is not None:
-                    conn.execute(
-                        "INSERT INTO entries (sgv, direction, type, timestamp) VALUES (?, ?, 'mbg', ?)",
-                        (glucose_mgdl, "Unknown", ts),
-                    )
-                    log.info("MBG entry from treatment: %.1f mg/dL @%s", glucose_mgdl, ts)
     finally:
         conn.close()
 
@@ -742,7 +740,7 @@ def get_history(
     conn = get_db()
     try:
         rows = conn.execute(
-            "SELECT sgv, direction, timestamp FROM entries WHERE timestamp >= ? ORDER BY timestamp ASC",
+            "SELECT sgv, direction, timestamp FROM entries WHERE timestamp >= ? AND (type = 'sgv' OR type IS NULL) ORDER BY timestamp ASC",
             (cutoff,),
         ).fetchall()
     finally:
@@ -774,7 +772,7 @@ def get_current(
     conn = get_db()
     try:
         row_e = conn.execute(
-            "SELECT sgv, direction, timestamp FROM entries ORDER BY timestamp DESC LIMIT 2"
+            "SELECT sgv, direction, timestamp FROM entries WHERE (type = 'sgv' OR type IS NULL) ORDER BY timestamp DESC LIMIT 2"
         ).fetchall()
         row_d = conn.execute(
             "SELECT iob, cob, battery FROM devicestatus ORDER BY timestamp DESC LIMIT 1"
