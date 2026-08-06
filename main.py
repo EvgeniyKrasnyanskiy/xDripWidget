@@ -64,6 +64,7 @@ def init_db() -> None:
                 id        INTEGER PRIMARY KEY AUTOINCREMENT,
                 sgv       REAL    NOT NULL,          -- mg/dL
                 direction TEXT    NOT NULL DEFAULT 'Unknown',
+                type      TEXT    NOT NULL DEFAULT 'sgv', -- sgv or mbg
                 timestamp INTEGER NOT NULL            -- unix seconds
             )
             """
@@ -98,6 +99,11 @@ def init_db() -> None:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_devstatus_ts  ON devicestatus(timestamp DESC)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_treatments_ts ON treatments(timestamp DESC)")
         # --- migrations ---
+        try:
+            conn.execute("ALTER TABLE entries ADD COLUMN type TEXT NOT NULL DEFAULT 'sgv'")
+            log.info("Migration: added type column to entries")
+        except sqlite3.OperationalError:
+            pass
         try:
             conn.execute("ALTER TABLE devicestatus ADD COLUMN battery INTEGER NOT NULL DEFAULT -1")
             log.info("Migration: added battery column to devicestatus")
@@ -271,7 +277,7 @@ def get_entries(request: Request, count: int = Query(default=100, le=1000)):
     """Nightscout-compatible entries endpoint — returns recent SGV/MBG entries for followers/xDrip+."""
     params = dict(request.query_params)
     # Support ?find[type]=mbg or ?count=N
-    entry_type = params.get("find[type]")  # e.g. "mbg" or "sgv"
+    entry_type = params.get("find[type]") or params.get("type")  # e.g. "mbg" or "sgv"
     min_ts_ms = params.get("find[date][$gte]")
     min_ts = None
     if min_ts_ms and str(min_ts_ms).isdigit():
@@ -282,12 +288,12 @@ def get_entries(request: Request, count: int = Query(default=100, le=1000)):
     try:
         if min_ts:
             rows = conn.execute(
-                "SELECT id, sgv, direction, timestamp FROM entries WHERE timestamp >= ? ORDER BY timestamp DESC LIMIT ?",
+                "SELECT id, sgv, direction, type, timestamp FROM entries WHERE timestamp >= ? ORDER BY timestamp DESC LIMIT ?",
                 (min_ts, count),
             ).fetchall()
         else:
             rows = conn.execute(
-                "SELECT id, sgv, direction, timestamp FROM entries ORDER BY timestamp DESC LIMIT ?",
+                "SELECT id, sgv, direction, type, timestamp FROM entries ORDER BY timestamp DESC LIMIT ?",
                 (count,),
             ).fetchall()
     finally:
@@ -295,22 +301,27 @@ def get_entries(request: Request, count: int = Query(default=100, le=1000)):
 
     result = []
     for r in rows:
+        rec_type = (r["type"] if r["type"] else "sgv").lower()
+        if entry_type and entry_type.lower() != rec_type:
+            continue
+
         ts_ms = r["timestamp"] * 1000
         iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(r["timestamp"]))
+        val = round(r["sgv"], 1)
         entry = {
             "_id": str(r["id"]),
-            "type": "sgv",
-            "sgv": round(r["sgv"], 1),
-            "mbg": round(r["sgv"], 1),
+            "type": rec_type,
             "dateString": iso,
             "date": ts_ms,
             "mills": ts_ms,
-            "direction": r["direction"],
-            "glucose": round(r["sgv"], 1),
+            "device": "xDripWidget",
+            "glucose": val,
         }
-        # filter by type if requested
-        if entry_type and entry_type.lower() not in ("sgv", "mbg"):
-            continue
+        if rec_type == "mbg":
+            entry["mbg"] = val
+        else:
+            entry["sgv"] = val
+            entry["direction"] = r["direction"]
         result.append(entry)
     return result
 
@@ -358,12 +369,16 @@ async def post_entries(request: Request):
                 if not ts:
                     ts = int(time.time())
 
+                e_type = str(raw.get("type", "sgv")).lower()
+                if entry.mbg is not None and entry.sgv is None:
+                    e_type = "mbg"
+
                 conn.execute(
-                    "INSERT INTO entries (sgv, direction, timestamp) VALUES (?, ?, ?)",
-                    (sgv_mgdl, entry.direction, ts),
+                    "INSERT INTO entries (sgv, direction, type, timestamp) VALUES (?, ?, ?, ?)",
+                    (sgv_mgdl, entry.direction, e_type, ts),
                 )
                 inserted += 1
-                log.info("Entry saved: %.1f mg/dL  %s  @%s", sgv_mgdl, entry.direction, ts)
+                log.info("Entry saved (%s): %.1f mg/dL  %s  @%s", e_type, sgv_mgdl, entry.direction, ts)
     finally:
         conn.close()
 
@@ -510,13 +525,13 @@ def get_treatments(request: Request, limit: int = 50):
 
 def _mark_voided(conn: sqlite3.Connection, tid: str) -> int:
     cur = conn.execute(
-        "UPDATE treatments SET is_voided = 1, eventType = 'Void', carbs = 0.0, insulin = 0.0, notes = '' WHERE uuid = ? OR id = ?",
+        "UPDATE treatments SET is_voided = 1, eventType = 'Void', carbs = 0.0, insulin = 0.0, notes = 'Voided' WHERE uuid = ? OR id = ?",
         (tid, tid),
     )
     if cur.rowcount == 0:
         conn.execute(
             "INSERT INTO treatments (uuid, eventType, insulin, carbs, notes, timestamp, is_voided) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (tid, "Void", 0.0, 0.0, "", int(time.time()), 1),
+            (tid, "Void", 0.0, 0.0, "Voided", int(time.time()), 1),
         )
         return 1
     return cur.rowcount
@@ -580,10 +595,10 @@ async def post_treatments(request: Request):
 
                 if glucose_mgdl is not None:
                     conn.execute(
-                        "INSERT INTO entries (sgv, direction, timestamp) VALUES (?, ?, ?)",
+                        "INSERT INTO entries (sgv, direction, type, timestamp) VALUES (?, ?, 'mbg', ?)",
                         (glucose_mgdl, "Unknown", ts),
                     )
-                    log.info("BG entry from treatment: %.1f mg/dL @%s", glucose_mgdl, ts)
+                    log.info("MBG entry from treatment: %.1f mg/dL @%s", glucose_mgdl, ts)
     finally:
         conn.close()
 
