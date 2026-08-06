@@ -457,6 +457,133 @@ async def post_treatments(request: Request):
     return {"saved": inserted}
 
 
+@app.delete(
+    "/api/v1/treatments/{treatment_id}",
+    status_code=status.HTTP_200_OK,
+    tags=["nightscout"],
+    dependencies=[Depends(verify_api_key)],
+)
+@app.delete(
+    "/api/v1/treatments/{treatment_id}.json",
+    status_code=status.HTTP_200_OK,
+    tags=["nightscout"],
+    dependencies=[Depends(verify_api_key)],
+    include_in_schema=False,
+)
+def delete_treatment_by_path(treatment_id: str):
+    """Delete treatment by ID (Nightscout REST API)."""
+    tid = treatment_id.replace(".json", "")
+    conn = get_db()
+    deleted = 0
+    try:
+        with conn:
+            cur = conn.execute("DELETE FROM treatments WHERE id = ?", (tid,))
+            deleted = cur.rowcount
+            log.info("Treatment deleted via path: id=%s (rows=%d)", tid, deleted)
+    finally:
+        conn.close()
+    return {"deleted": deleted}
+
+
+@app.delete(
+    "/api/v1/treatments",
+    status_code=status.HTTP_200_OK,
+    tags=["nightscout"],
+    dependencies=[Depends(verify_api_key)],
+)
+@app.delete(
+    "/api/v1/treatments.json",
+    status_code=status.HTTP_200_OK,
+    tags=["nightscout"],
+    dependencies=[Depends(verify_api_key)],
+    include_in_schema=False,
+)
+def delete_treatment_by_query(request: Request):
+    """Delete treatment by query params (e.g. ?find[_id]=123 or ?id=123)."""
+    params = dict(request.query_params)
+    tid = params.get("id") or params.get("find[_id]") or params.get("_id")
+    deleted = 0
+    conn = get_db()
+    try:
+        with conn:
+            if tid:
+                cur = conn.execute("DELETE FROM treatments WHERE id = ?", (tid,))
+                deleted = cur.rowcount
+                log.info("Treatment deleted via query: id=%s (rows=%d)", tid, deleted)
+            else:
+                log.warning("DELETE /treatments called without id in params: %s", params)
+    finally:
+        conn.close()
+    return {"deleted": deleted}
+
+
+@app.put(
+    "/api/v1/treatments.json",
+    status_code=status.HTTP_200_OK,
+    tags=["nightscout"],
+    dependencies=[Depends(verify_api_key)],
+)
+@app.put(
+    "/api/v1/treatments",
+    status_code=status.HTTP_200_OK,
+    tags=["nightscout"],
+    dependencies=[Depends(verify_api_key)],
+    include_in_schema=False,
+)
+@app.put(
+    "/api/v1/treatments/{treatment_id}",
+    status_code=status.HTTP_200_OK,
+    tags=["nightscout"],
+    dependencies=[Depends(verify_api_key)],
+    include_in_schema=False,
+)
+@app.put(
+    "/api/v1/treatments/{treatment_id}.json",
+    status_code=status.HTTP_200_OK,
+    tags=["nightscout"],
+    dependencies=[Depends(verify_api_key)],
+    include_in_schema=False,
+)
+async def put_treatments(request: Request, treatment_id: Optional[str] = None):
+    """
+    Nightscout-compatible PUT endpoint to update or void treatments.
+    xDrip+ sends PUT when editing or deleting/voiding treatments.
+    """
+    body = await request.json()
+    if isinstance(body, dict):
+        body = [body]
+
+    conn = get_db()
+    updated = 0
+    try:
+        with conn:
+            for raw in body:
+                tid = treatment_id or raw.get("_id") or raw.get("id")
+                if tid:
+                    tid = str(tid).replace(".json", "")
+                    insulin = float(raw.get("insulin", 0.0) or 0.0)
+                    carbs = float(raw.get("carbs", 0.0) or 0.0)
+                    notes = str(raw.get("notes", "") or "")
+                    event_type = str(raw.get("eventType", "Meal Bolus") or "Meal Bolus")
+
+                    # Check if treatment is marked as voided or deleted
+                    if raw.get("isVoided") or raw.get("eventType") == "Void" or raw.get("notes") == "Voided":
+                        cur = conn.execute("DELETE FROM treatments WHERE id = ?", (tid,))
+                        updated += cur.rowcount
+                        log.info("Treatment voided/deleted via PUT: id=%s", tid)
+                    else:
+                        cur = conn.execute(
+                            "UPDATE treatments SET eventType = ?, insulin = ?, carbs = ?, notes = ? WHERE id = ?",
+                            (event_type, insulin, carbs, notes, tid),
+                        )
+                        updated += cur.rowcount
+                        log.info("Treatment updated via PUT: id=%s Insulin=%.1f Carbs=%.1f", tid, insulin, carbs)
+    finally:
+        conn.close()
+
+    return {"updated": updated}
+
+
 @app.get("/api/v1/history", tags=["widget"])
 def get_history(
     hours: float = Query(default=4.0, ge=0.5, le=24.0),

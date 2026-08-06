@@ -15,11 +15,14 @@ Features:
   - Treatments logging (Carbs / Insulin / Blood Glucose) to server
   - GitHub update checker (in About dialog only)
   - Exit confirmation dialog
+  - Debug logging with 1MB rotating file handler (widget.log)
 
 Requirements: widget_requirements.txt
 """
 
 import json
+import logging
+from logging.handlers import RotatingFileHandler
 import os
 import sys
 import time
@@ -57,7 +60,6 @@ from PyQt6.QtWidgets import (
     QDialogButtonBox,
     QDoubleSpinBox,
     QFormLayout,
-    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -71,10 +73,34 @@ from PyQt6.QtWidgets import (
 )
 
 # ---------------------------------------------------------------------------
+# Logging Setup (Rotating File Handler: 1 MB max, 2 backup files)
+# ---------------------------------------------------------------------------
+LOG_FILE = "widget.log"
+logger = logging.getLogger("xDripWidget")
+logger.setLevel(logging.DEBUG)
+
+if not logger.handlers:
+    try:
+        file_handler = RotatingFileHandler(
+            LOG_FILE, maxBytes=1_000_000, backupCount=2, encoding="utf-8"
+        )
+        formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
+
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(formatter)
+        logger.addHandler(console_handler)
+    except Exception as exc:
+        print(f"Failed to initialize log file handler: {exc}")
+
+logger.info("=================== xDrip Widget Initializing ===================")
+
+# ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 APP_NAME     = "xDrip Widget"
-APP_VERSION  = "1.3.0"
+APP_VERSION  = "1.3.1"
 ORG_NAME     = "xdripwidget"
 INSTANCE_KEY = "xDripWidgetSingleInstance"
 DEFAULT_URL  = "http://localhost:8080"
@@ -124,8 +150,9 @@ def get_settings() -> QSettings:
         try:
             with open(CONFIG_FILE, "w", encoding="utf-8") as f:
                 f.write("[General]\nserver_url = http://localhost:8080\napi_secret = \nopacity = 90\n")
-        except Exception:
-            pass
+            logger.info("Created default config.ini file")
+        except Exception as e:
+            logger.error(f"Error creating config.ini: {e}")
     return QSettings(CONFIG_FILE, QSettings.Format.IniFormat)
 
 
@@ -189,6 +216,7 @@ class FetchWorker(QThread):
         self._cancelled  = False
 
     def cancel(self):
+        logger.debug("FetchWorker.cancel() called")
         self._cancelled = True
 
     def run(self):
@@ -198,6 +226,7 @@ class FetchWorker(QThread):
             url_curr += f"?token={self._api_secret}"
             url_hist += f"&token={self._api_secret}"
 
+        logger.debug(f"FetchWorker: requesting {url_curr}")
         try:
             req_curr = urllib.request.Request(
                 url_curr,
@@ -207,26 +236,31 @@ class FetchWorker(QThread):
                 data_curr = json.loads(resp.read().decode())
 
             if self._cancelled:
+                logger.debug("FetchWorker cancelled after current fetch")
                 return
 
             data_hist = []
             try:
+                logger.debug(f"FetchWorker: requesting {url_hist}")
                 req_hist = urllib.request.Request(
                     url_hist,
                     headers={"Accept": "application/json", "Connection": "close"}
                 )
                 with urllib.request.urlopen(req_hist, timeout=8) as resp:
                     data_hist = json.loads(resp.read().decode())
-            except Exception:
-                pass  # optional sparkline history
+            except Exception as e_hist:
+                logger.warning(f"FetchWorker: history fetch failed: {e_hist}")
 
             if not self._cancelled:
+                logger.debug(f"FetchWorker success: mmol={data_curr.get('mmol')}, hist_len={len(data_hist)}")
                 self.data_ready.emit(data_curr, data_hist)
         except urllib.error.HTTPError as e:
             if not self._cancelled:
+                logger.error(f"FetchWorker HTTP error: {e.code}")
                 self.fetch_error.emit(f"HTTP {e.code}")
         except Exception as exc:
             if not self._cancelled:
+                logger.error(f"FetchWorker error: {exc}")
                 self.fetch_error.emit(str(exc))
 
 
@@ -240,6 +274,7 @@ class UpdateCheckerWorker(QThread):
 
     def run(self):
         url = "https://api.github.com/repos/EvgeniyKrasnyanskiy/xDripWidget/releases/latest"
+        logger.debug(f"UpdateCheckerWorker: checking {url}")
         try:
             req = urllib.request.Request(
                 url,
@@ -252,8 +287,10 @@ class UpdateCheckerWorker(QThread):
             html_url = data.get("html_url", "https://github.com/EvgeniyKrasnyanskiy/xDripWidget/releases")
 
             has_update = (tag != "" and tag != self._current_version and tag > self._current_version)
+            logger.debug(f"UpdateCheckerWorker result: tag={tag}, has_update={has_update}")
             self.update_result.emit(has_update, tag, body, html_url)
         except Exception as exc:
+            logger.error(f"UpdateCheckerWorker error: {exc}")
             self.error_signal.emit(str(exc))
 
 
@@ -274,7 +311,7 @@ class TreatmentDialog(QDialog):
         self._glucose_spin.setRange(0, 30.0)
         self._glucose_spin.setDecimals(1)
         self._glucose_spin.setSuffix(" ммоль/л")
-        self._glucose_spin.setSpecialValueText("Не указано")  # value=0 means not set
+        self._glucose_spin.setSpecialValueText("Не указано")
 
         # --- Carbs ---
         self._carbs_spin = QDoubleSpinBox()
@@ -326,11 +363,9 @@ class TreatmentDialog(QDialog):
         layout.addLayout(form)
         layout.addWidget(buttons)
 
-        # Connect event type change for auto-select
         self._event_type_combo.currentTextChanged.connect(self._on_event_type_changed)
 
     def _on_event_type_changed(self, event_type: str):
-        """Auto-adjust available fields by event type."""
         is_bg_check = (event_type == "BG Check")
         self._carbs_spin.setEnabled(not is_bg_check or self._carbs_spin.value() > 0)
         self._insulin_spin.setEnabled(not is_bg_check or self._insulin_spin.value() > 0)
@@ -338,14 +373,13 @@ class TreatmentDialog(QDialog):
     def _submit(self):
         carbs   = self._carbs_spin.value()
         insulin = self._insulin_spin.value()
-        glucose = self._glucose_spin.value()  # 0.0 means not set
+        glucose = self._glucose_spin.value()
         event_type = self._event_type_combo.currentText()
 
         if carbs <= 0 and insulin <= 0 and glucose <= 0:
             QMessageBox.warning(self, "Внимание", "Укажите хотя бы одно значение: глюкоза, углеводы или инсулин.")
             return
 
-        # Convert QDateTime to unix timestamp
         qdt = self._datetime_edit.dateTime()
         ts = qdt.toSecsSinceEpoch()
 
@@ -365,6 +399,7 @@ class TreatmentDialog(QDialog):
         if self._api_secret:
             url += f"?token={self._api_secret}"
 
+        logger.debug(f"Submitting treatment to {url}: {payload}")
         try:
             req_data = json.dumps(payload).encode("utf-8")
             req = urllib.request.Request(
@@ -373,9 +408,11 @@ class TreatmentDialog(QDialog):
             )
             with urllib.request.urlopen(req, timeout=8) as resp:
                 pass
+            logger.info(f"Treatment submitted successfully: {event_type}")
             QMessageBox.information(self, "Успешно", "Данные отправлены на сервер!")
             self.accept()
         except Exception as e:
+            logger.error(f"Failed to submit treatment: {e}")
             QMessageBox.critical(self, "Ошибка", f"Не удалось отправить данные:\n{e}")
 
 
@@ -434,11 +471,12 @@ class SettingsDialog(QDialog):
         s.setValue("api_secret",  self._secret_edit.text().strip())
         s.setValue("opacity",     self._opacity_slider.value())
         s.sync()
+        logger.info("Settings saved in SettingsDialog")
         self.accept()
 
 
 # ---------------------------------------------------------------------------
-# About dialog (with "Check Updates" button — only place)
+# About dialog
 # ---------------------------------------------------------------------------
 class AboutDialog(QDialog):
     def __init__(self, parent=None):
@@ -493,7 +531,7 @@ class GlucoseWidget(QWidget):
         self._error: Optional[str] = None
         self._worker: Optional[FetchWorker] = None
         self._update_worker: Optional[UpdateCheckerWorker] = None
-        self._last_alerts: dict[str, float] = {}  # alert_key → unix timestamp
+        self._last_alerts: dict[str, float] = {}
         self._is_quitting: bool = False
         self._config_mtime: float = 0.0
 
@@ -567,6 +605,7 @@ class GlucoseWidget(QWidget):
     # Polling & Hot-Reload
     # ------------------------------------------------------------------
     def _start_polling(self):
+        logger.info("Starting polling timer")
         self._fetch()
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._on_poll_timer)
@@ -577,33 +616,35 @@ class GlucoseWidget(QWidget):
         self._fetch()
 
     def _check_config_hot_reload(self):
-        """Reload opacity and config if config.ini was updated externally."""
         if not os.path.exists(CONFIG_FILE):
             return
         try:
             mtime = os.path.getmtime(CONFIG_FILE)
             if mtime > self._config_mtime:
                 self._config_mtime = mtime
+                logger.info("Detected config.ini modification, reloading settings...")
                 s = get_settings()
                 self.setWindowOpacity(int(s.value("opacity", 90)) / 100.0)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"Hot reload check error: {e}")
 
     def _fetch(self):
-        # If previous worker still running — cancel and wait briefly, then replace
+        logger.debug("_fetch() invoked")
+
+        # Safely clean up previous worker if finished or running
         if self._worker is not None:
             if self._worker.isRunning():
+                logger.debug("_fetch(): previous worker is still running, cancelling it")
                 self._worker.cancel()
-                # Disconnect all signals to avoid stale callbacks after replacement
                 try:
                     self._worker.data_ready.disconnect()
                     self._worker.fetch_error.disconnect()
-                    self._worker.finished.disconnect()
                 except Exception:
                     pass
-                # Let it finish on its own (it's cancelled)
+                return  # skip this poll tick, next tick will start fresh
+            else:
+                logger.debug("_fetch(): cleaning up finished worker reference")
                 self._worker = None
-                return  # skip this cycle, next timer will fetch fresh
 
         s      = get_settings()
         url    = str(s.value("server_url", DEFAULT_URL))
@@ -612,14 +653,19 @@ class GlucoseWidget(QWidget):
         worker = FetchWorker(url, secret)
         worker.data_ready.connect(self._on_data)
         worker.fetch_error.connect(self._on_error)
-        worker.finished.connect(worker.deleteLater)
-        worker.start()
+        worker.finished.connect(self._on_fetch_worker_finished)
         self._worker = worker
+        worker.start()
+
+    def _on_fetch_worker_finished(self):
+        logger.debug("_on_fetch_worker_finished")
+        if self._worker is not None:
+            w = self._worker
+            self._worker = None
+            w.deleteLater()
 
     def _on_data(self, data: dict, history: list):
-        # Guard: only process if we're still alive
-        if not self._worker:
-            return
+        logger.debug(f"_on_data received: mmol={data.get('mmol')}")
         self._data    = data
         self._history = history
         self._error   = None
@@ -634,6 +680,7 @@ class GlucoseWidget(QWidget):
         self._update_tray_tooltip()
 
     def _on_error(self, msg: str):
+        logger.warning(f"_on_error: {msg}")
         self._error = msg
         self._update_tray_icon(COLOR_GRAY)
         self.update()
@@ -655,6 +702,7 @@ class GlucoseWidget(QWidget):
 
         if mmol > ALERT_CRITICAL and can_alert("critical"):
             self._last_alerts["critical"] = now
+            logger.info(f"Triggering critical alert: {mmol:.1f}")
             self._tray.showMessage(
                 "⛔ Критически высокий сахар!",
                 f"{mmol:.1f} ммоль/л — немедленно примите меры!",
@@ -662,6 +710,7 @@ class GlucoseWidget(QWidget):
             )
         elif mmol > ALERT_HYPER and can_alert("hyper"):
             self._last_alerts["hyper"] = now
+            logger.info(f"Triggering hyper alert: {mmol:.1f}")
             self._tray.showMessage(
                 "🟡 Высокий сахар",
                 f"{mmol:.1f} ммоль/л — выше нормы.",
@@ -669,6 +718,7 @@ class GlucoseWidget(QWidget):
             )
         elif mmol < ALERT_HYPO and can_alert("hypo"):
             self._last_alerts["hypo"] = now
+            logger.info(f"Triggering hypo alert: {mmol:.1f}")
             self._tray.showMessage(
                 "🔴 Низкий сахар!",
                 f"{mmol:.1f} ммоль/л — опасная гипогликемия!",
@@ -676,11 +726,18 @@ class GlucoseWidget(QWidget):
             )
 
     # ------------------------------------------------------------------
-    # GitHub Updates (called only from AboutDialog)
+    # GitHub Updates
     # ------------------------------------------------------------------
     def _check_updates(self, interactive: bool = False):
-        if self._update_worker and self._update_worker.isRunning():
-            return
+        logger.debug(f"_check_updates(interactive={interactive})")
+
+        if self._update_worker is not None:
+            if self._update_worker.isRunning():
+                logger.debug("_check_updates: update worker is already running")
+                return
+            else:
+                self._update_worker = None
+
         worker = UpdateCheckerWorker(APP_VERSION)
         worker.update_result.connect(
             lambda has_upd, tag, body, url: self._on_update_result(has_upd, tag, body, url, interactive)
@@ -692,11 +749,19 @@ class GlucoseWidget(QWidget):
                     f"Не удалось проверить обновления:\n{err}"
                 )
             )
-        worker.finished.connect(worker.deleteLater)
-        worker.start()
+        worker.finished.connect(self._on_update_worker_finished)
         self._update_worker = worker
+        worker.start()
+
+    def _on_update_worker_finished(self):
+        logger.debug("_on_update_worker_finished")
+        if self._update_worker is not None:
+            w = self._update_worker
+            self._update_worker = None
+            w.deleteLater()
 
     def _on_update_result(self, has_update: bool, tag: str, body: str, url: str, interactive: bool):
+        logger.info(f"Update check result: has_update={has_update}, tag={tag}")
         if has_update:
             msg = f"Доступна новая версия: v{tag}\n\n{body[:300]}"
             reply = QMessageBox.information(
@@ -720,7 +785,6 @@ class GlucoseWidget(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        # Rounded dark background
         path = QPainterPath()
         path.addRoundedRect(0, 0, self.width(), self.height(), 14, 14)
         painter.fillPath(path, COLOR_BG)
@@ -746,7 +810,7 @@ class GlucoseWidget(QWidget):
         color = glucose_color(mmol, stale)
         arrow = TREND_ARROWS.get(direction, "?")
 
-        # ── Glucose + arrow (large, right-aligned) ────────────────────
+        # ── Glucose + arrow ───────────────────────────────────────────
         painter.setPen(color)
         painter.setFont(self._font_big)
         painter.drawText(
@@ -755,7 +819,7 @@ class GlucoseWidget(QWidget):
             f"{mmol:.1f} {arrow}",
         )
 
-        # ── Delta (medium, left) ──────────────────────────────────────
+        # ── Delta ─────────────────────────────────────────────────────
         painter.setPen(COLOR_SUB)
         painter.setFont(self._font_med)
         painter.drawText(
@@ -764,7 +828,7 @@ class GlucoseWidget(QWidget):
             f"Δ {delta}",
         )
 
-        # ── Middle row: [battery bar] | time ─────────────────────────
+        # ── Battery & Time ───────────────────────────────────────────
         self._draw_battery_bar(painter, battery, stale)
 
         time_color = COLOR_GRAY if stale else COLOR_SUB
@@ -822,16 +886,11 @@ class GlucoseWidget(QWidget):
         )
 
     def _draw_sparkline(self, painter: QPainter):
-        """Draw 4-hour history sparkline with colored dots.
-        Dot color is based on glucose value only (stale flag is NOT used here —
-        historical points are never 'stale' by definition).
-        """
         if not self._history or len(self._history) < 2:
             return
 
         GX, GY, GW, GH = 10, 85, 200, 48
 
-        # Determine Y-axis range
         min_val = 2.5
         max_val = 14.0
         for r in self._history:
@@ -847,7 +906,6 @@ class GlucoseWidget(QWidget):
             ratio = (v - min_val) / val_range
             return GY + GH - (ratio * GH)
 
-        # Target range guides (3.9 and 9.0 mmol/L)
         y_lo = val_to_y(3.9)
         y_hi = val_to_y(9.0)
         painter.setPen(QPen(QColor(255, 255, 255, 35), 1, Qt.PenStyle.DashLine))
@@ -866,17 +924,14 @@ class GlucoseWidget(QWidget):
             v  = float(r.get("mmol", 5.5))
             px = GX + int((ts - t_start) / t_span * GW)
             py = int(val_to_y(v))
-            # Historical points are colored by glucose level only, never gray
             dot_color = glucose_color(v, stale=False)
             points.append((px, py, dot_color))
 
-        # Connecting line
         painter.setPen(QPen(QColor(200, 200, 200, 70), 1.2))
         for i in range(len(points) - 1):
             p1, p2 = points[i], points[i + 1]
             painter.drawLine(p1[0], p1[1], p2[0], p2[1])
 
-        # Color-coded dots
         for px, py, dot_color in points:
             painter.setPen(QPen(dot_color.darker(120), 1))
             painter.setBrush(QBrush(dot_color))
@@ -901,11 +956,11 @@ class GlucoseWidget(QWidget):
             s = get_settings()
             s.setValue("position", self.pos())
             s.sync()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"Error saving widget position: {e}")
 
     # ------------------------------------------------------------------
-    # Context menu (right-click on widget)
+    # Context menu
     # ------------------------------------------------------------------
     def _show_context_menu(self, global_pos: QPoint):
         menu = QMenu(self)
@@ -981,6 +1036,7 @@ class GlucoseWidget(QWidget):
             QMessageBox.StandardButton.No,
         )
         if reply == QMessageBox.StandardButton.Yes:
+            logger.info("User confirmed application exit")
             self._is_quitting = True
             QApplication.quit()
 
@@ -1009,6 +1065,7 @@ def _ensure_single_instance() -> Optional[QLocalServer]:
     sock.connectToServer(INSTANCE_KEY)
     if sock.waitForConnected(400):
         sock.disconnectFromServer()
+        logger.info(f"{APP_NAME} is already running.")
         print(f"{APP_NAME} is already running.")
         sys.exit(0)
 
