@@ -199,6 +199,9 @@ class TreatmentIn(BaseModel):
     notes: str = ""
     created_at: Optional[Union[str, int]] = None
     date: Optional[int] = None
+    # Optional manual blood glucose value (mmol/L)
+    glucose: Optional[float] = None
+    units: Optional[str] = None  # "mmol" or "mgdl"
 
 
 # ---------------------------------------------------------------------------
@@ -422,12 +425,32 @@ async def post_treatments(request: Request):
                 if not ts:
                     ts = int(time.time())
 
+                # Handle optional glucose value (convert mmol→mgdl if needed)
+                glucose_mgdl: Optional[float] = None
+                if t.glucose is not None and t.glucose > 0:
+                    if t.units == "mmol":
+                        glucose_mgdl = round(t.glucose * 18.0182, 1)
+                    else:
+                        glucose_mgdl = t.glucose  # assume mgdl already
+
                 conn.execute(
                     "INSERT INTO treatments (eventType, insulin, carbs, notes, timestamp) VALUES (?, ?, ?, ?, ?)",
                     (t.eventType, t.insulin, t.carbs, t.notes, ts),
                 )
                 inserted += 1
-                log.info("Treatment saved: %s Insulin=%.1f Carbs=%.1f @%s", t.eventType, t.insulin, t.carbs, ts)
+                log.info(
+                    "Treatment saved: %s Insulin=%.1f Carbs=%.1f Glucose=%s @%s",
+                    t.eventType, t.insulin, t.carbs,
+                    f"{glucose_mgdl:.1f}mg/dL" if glucose_mgdl else "—", ts
+                )
+
+                # If glucose provided, also store it as a BG entry so xDrip+ receives it
+                if glucose_mgdl is not None:
+                    conn.execute(
+                        "INSERT INTO entries (sgv, direction, timestamp) VALUES (?, ?, ?)",
+                        (glucose_mgdl, "Unknown", ts),
+                    )
+                    log.info("BG entry from treatment: %.1f mg/dL @%s", glucose_mgdl, ts)
     finally:
         conn.close()
 

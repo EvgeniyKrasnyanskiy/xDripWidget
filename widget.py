@@ -12,8 +12,8 @@ Features:
   - Config storage in config.ini (with fallback & hot-reload)
   - Dynamic blood-drop tray icon (color-coded by glucose state)
   - 4-hour glucose history sparkline graph
-  - Treatments logging (Carbs / Insulin) to server
-  - GitHub update checker
+  - Treatments logging (Carbs / Insulin / Blood Glucose) to server
+  - GitHub update checker (in About dialog only)
   - Exit confirmation dialog
 
 Requirements: widget_requirements.txt
@@ -25,9 +25,11 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from datetime import datetime
 from typing import Optional
 
 from PyQt6.QtCore import (
+    QDateTime,
     QPoint,
     QSettings,
     Qt,
@@ -49,10 +51,13 @@ from PyQt6.QtGui import (
 from PyQt6.QtNetwork import QLocalServer, QLocalSocket
 from PyQt6.QtWidgets import (
     QApplication,
+    QComboBox,
+    QDateTimeEdit,
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
     QFormLayout,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -69,7 +74,7 @@ from PyQt6.QtWidgets import (
 # Constants
 # ---------------------------------------------------------------------------
 APP_NAME     = "xDrip Widget"
-APP_VERSION  = "1.2.0"
+APP_VERSION  = "1.3.0"
 ORG_NAME     = "xdripwidget"
 INSTANCE_KEY = "xDripWidgetSingleInstance"
 DEFAULT_URL  = "http://localhost:8080"
@@ -181,15 +186,17 @@ class FetchWorker(QThread):
         super().__init__()
         self._base_url   = base_url
         self._api_secret = api_secret
+        self._cancelled  = False
+
+    def cancel(self):
+        self._cancelled = True
 
     def run(self):
         url_curr = self._base_url.rstrip("/") + "/api/v1/current"
         url_hist = self._base_url.rstrip("/") + "/api/v1/history?hours=4"
         if self._api_secret:
-            sep_c = "&" if "?" in url_curr else "?"
-            sep_h = "&" if "?" in url_hist else "?"
-            url_curr += f"{sep_c}token={self._api_secret}"
-            url_hist += f"{sep_h}token={self._api_secret}"
+            url_curr += f"?token={self._api_secret}"
+            url_hist += f"&token={self._api_secret}"
 
         try:
             req_curr = urllib.request.Request(
@@ -198,6 +205,9 @@ class FetchWorker(QThread):
             )
             with urllib.request.urlopen(req_curr, timeout=8) as resp:
                 data_curr = json.loads(resp.read().decode())
+
+            if self._cancelled:
+                return
 
             data_hist = []
             try:
@@ -210,11 +220,14 @@ class FetchWorker(QThread):
             except Exception:
                 pass  # optional sparkline history
 
-            self.data_ready.emit(data_curr, data_hist)
+            if not self._cancelled:
+                self.data_ready.emit(data_curr, data_hist)
         except urllib.error.HTTPError as e:
-            self.fetch_error.emit(f"HTTP {e.code}")
+            if not self._cancelled:
+                self.fetch_error.emit(f"HTTP {e.code}")
         except Exception as exc:
-            self.fetch_error.emit(str(exc))
+            if not self._cancelled:
+                self.fetch_error.emit(str(exc))
 
 
 class UpdateCheckerWorker(QThread):
@@ -245,32 +258,62 @@ class UpdateCheckerWorker(QThread):
 
 
 # ---------------------------------------------------------------------------
-# Treatments dialog (Insulin & Carbs input)
+# Treatments dialog (Insulin, Carbs, Blood Glucose input + datetime)
 # ---------------------------------------------------------------------------
 class TreatmentDialog(QDialog):
     def __init__(self, base_url: str, api_secret: str = "", parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Ввод данных (Инсулин / Углеводы)")
+        self.setWindowTitle("Ввод данных терапии")
         self.setModal(True)
-        self.resize(320, 180)
+        self.resize(360, 280)
         self._base_url = base_url
         self._api_secret = api_secret
 
+        # --- Glucose BG (optional) ---
+        self._glucose_spin = QDoubleSpinBox()
+        self._glucose_spin.setRange(0, 30.0)
+        self._glucose_spin.setDecimals(1)
+        self._glucose_spin.setSuffix(" ммоль/л")
+        self._glucose_spin.setSpecialValueText("Не указано")  # value=0 means not set
+
+        # --- Carbs ---
         self._carbs_spin = QDoubleSpinBox()
-        self._carbs_spin.setRange(0, 300)
+        self._carbs_spin.setRange(0, 500)
         self._carbs_spin.setDecimals(1)
         self._carbs_spin.setSuffix(" г")
 
+        # --- Insulin ---
         self._insulin_spin = QDoubleSpinBox()
         self._insulin_spin.setRange(0, 100)
-        self._insulin_spin.setDecimals(1)
+        self._insulin_spin.setDecimals(2)
         self._insulin_spin.setSuffix(" ЕД")
 
+        # --- Event type ---
+        self._event_type_combo = QComboBox()
+        self._event_type_combo.addItems([
+            "Meal Bolus",
+            "Correction Bolus",
+            "Carb Intake",
+            "BG Check",
+            "Note",
+        ])
+
+        # --- Notes ---
         self._notes_edit = QLineEdit()
+        self._notes_edit.setPlaceholderText("Необязательно")
+
+        # --- DateTime ---
+        self._datetime_edit = QDateTimeEdit()
+        self._datetime_edit.setDisplayFormat("dd.MM.yyyy  HH:mm")
+        self._datetime_edit.setDateTime(QDateTime.currentDateTime())
+        self._datetime_edit.setCalendarPopup(True)
 
         form = QFormLayout()
+        form.addRow("Тип события:", self._event_type_combo)
+        form.addRow("Глюкоза крови:", self._glucose_spin)
         form.addRow("Углеводы:", self._carbs_spin)
-        form.addRow("Инсулин (болюс):", self._insulin_spin)
+        form.addRow("Инсулин:", self._insulin_spin)
+        form.addRow("Дата/Время:", self._datetime_edit)
         form.addRow("Заметка:", self._notes_edit)
 
         buttons = QDialogButtonBox(
@@ -283,25 +326,44 @@ class TreatmentDialog(QDialog):
         layout.addLayout(form)
         layout.addWidget(buttons)
 
+        # Connect event type change for auto-select
+        self._event_type_combo.currentTextChanged.connect(self._on_event_type_changed)
+
+    def _on_event_type_changed(self, event_type: str):
+        """Auto-adjust available fields by event type."""
+        is_bg_check = (event_type == "BG Check")
+        self._carbs_spin.setEnabled(not is_bg_check or self._carbs_spin.value() > 0)
+        self._insulin_spin.setEnabled(not is_bg_check or self._insulin_spin.value() > 0)
+
     def _submit(self):
-        carbs = self._carbs_spin.value()
+        carbs   = self._carbs_spin.value()
         insulin = self._insulin_spin.value()
-        if carbs <= 0 and insulin <= 0:
-            QMessageBox.warning(self, "Внимание", "Укажите количество углеводов или инсулина.")
+        glucose = self._glucose_spin.value()  # 0.0 means not set
+        event_type = self._event_type_combo.currentText()
+
+        if carbs <= 0 and insulin <= 0 and glucose <= 0:
+            QMessageBox.warning(self, "Внимание", "Укажите хотя бы одно значение: глюкоза, углеводы или инсулин.")
             return
 
-        payload = {
-            "eventType": "Meal Bolus" if insulin > 0 else "Carb Intake",
+        # Convert QDateTime to unix timestamp
+        qdt = self._datetime_edit.dateTime()
+        ts = qdt.toSecsSinceEpoch()
+
+        payload: dict = {
+            "eventType": event_type,
             "carbs": carbs,
             "insulin": insulin,
             "notes": self._notes_edit.text().strip(),
-            "created_at": int(time.time()),
+            "created_at": ts,
+            "date": ts * 1000,
         }
+        if glucose > 0:
+            payload["glucose"] = glucose
+            payload["units"] = "mmol"
 
         url = self._base_url.rstrip("/") + "/api/v1/treatments"
         if self._api_secret:
-            sep = "&" if "?" in url else "?"
-            url += f"{sep}token={self._api_secret}"
+            url += f"?token={self._api_secret}"
 
         try:
             req_data = json.dumps(payload).encode("utf-8")
@@ -314,7 +376,7 @@ class TreatmentDialog(QDialog):
             QMessageBox.information(self, "Успешно", "Данные отправлены на сервер!")
             self.accept()
         except Exception as e:
-            QMessageBox.critical(self, "Ошибка", f"Не удалось отправить данные: {e}")
+            QMessageBox.critical(self, "Ошибка", f"Не удалось отправить данные:\n{e}")
 
 
 # ---------------------------------------------------------------------------
@@ -376,7 +438,7 @@ class SettingsDialog(QDialog):
 
 
 # ---------------------------------------------------------------------------
-# About dialog
+# About dialog (with "Check Updates" button — only place)
 # ---------------------------------------------------------------------------
 class AboutDialog(QDialog):
     def __init__(self, parent=None):
@@ -404,9 +466,8 @@ class AboutDialog(QDialog):
         """)
         text.setReadOnly(True)
 
-        self._check_btn = QDialogButtonBox.StandardButton.Ok
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok)
-        btn_update = buttons.addButton("Проверить обновления", QDialogButtonBox.ButtonRole.ActionRole)
+        btn_update = buttons.addButton("Проверить обновления…", QDialogButtonBox.ButtonRole.ActionRole)
         btn_update.clicked.connect(self._check_updates)
         buttons.accepted.connect(self.accept)
 
@@ -415,8 +476,9 @@ class AboutDialog(QDialog):
         layout.addWidget(buttons)
 
     def _check_updates(self):
-        if self.parent() and hasattr(self.parent(), "_check_updates"):
-            self.parent()._check_updates(interactive=True)
+        parent = self.parent()
+        if parent and hasattr(parent, "_check_updates"):
+            parent._check_updates(interactive=True)
 
 
 # ---------------------------------------------------------------------------
@@ -450,7 +512,7 @@ class GlucoseWidget(QWidget):
             | Qt.WindowType.Tool
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setFixedSize(220, 145)  # Expanded height for 4-hour sparkline
+        self.setFixedSize(220, 145)
 
         s = get_settings()
         self.move(s.value("position", QPoint(100, 100)))
@@ -482,16 +544,15 @@ class GlucoseWidget(QWidget):
         for label, slot in [
             ("Показать / скрыть",          self._toggle_visibility),
             ("Обновить сейчас",            self._fetch),
-            ("Ввести (Инсулин/Углеводы)",  self._open_treatments),
+            ("Ввести данные терапии",      self._open_treatments),
         ]:
             a = QAction(label, self)
             a.triggered.connect(slot)
             menu.addAction(a)
         menu.addSeparator()
         for label, slot in [
-            ("Проверить обновления…", self.lambda_check_updates),
-            ("Настройки…",            self._open_settings),
-            ("О программе",           self._open_about),
+            ("Настройки…",   self._open_settings),
+            ("О программе",  self._open_about),
         ]:
             a = QAction(label, self)
             a.triggered.connect(slot)
@@ -501,9 +562,6 @@ class GlucoseWidget(QWidget):
         a_quit.triggered.connect(self._confirm_and_quit)
         menu.addAction(a_quit)
         return menu
-
-    def lambda_check_updates(self):
-        self._check_updates(interactive=True)
 
     # ------------------------------------------------------------------
     # Polling & Hot-Reload
@@ -522,32 +580,52 @@ class GlucoseWidget(QWidget):
         """Reload opacity and config if config.ini was updated externally."""
         if not os.path.exists(CONFIG_FILE):
             return
-        mtime = os.path.getmtime(CONFIG_FILE)
-        if mtime > self._config_mtime:
-            self._config_mtime = mtime
-            s = get_settings()
-            self.setWindowOpacity(int(s.value("opacity", 90)) / 100.0)
+        try:
+            mtime = os.path.getmtime(CONFIG_FILE)
+            if mtime > self._config_mtime:
+                self._config_mtime = mtime
+                s = get_settings()
+                self.setWindowOpacity(int(s.value("opacity", 90)) / 100.0)
+        except Exception:
+            pass
 
     def _fetch(self):
-        if self._worker and self._worker.isRunning():
-            return
+        # If previous worker still running — cancel and wait briefly, then replace
+        if self._worker is not None:
+            if self._worker.isRunning():
+                self._worker.cancel()
+                # Disconnect all signals to avoid stale callbacks after replacement
+                try:
+                    self._worker.data_ready.disconnect()
+                    self._worker.fetch_error.disconnect()
+                    self._worker.finished.disconnect()
+                except Exception:
+                    pass
+                # Let it finish on its own (it's cancelled)
+                self._worker = None
+                return  # skip this cycle, next timer will fetch fresh
+
         s      = get_settings()
         url    = str(s.value("server_url", DEFAULT_URL))
         secret = str(s.value("api_secret", ""))
-        self._worker = FetchWorker(url, secret)
-        self._worker.data_ready.connect(self._on_data)
-        self._worker.fetch_error.connect(self._on_error)
-        self._worker.finished.connect(self._worker.deleteLater)
-        self._worker.start()
+
+        worker = FetchWorker(url, secret)
+        worker.data_ready.connect(self._on_data)
+        worker.fetch_error.connect(self._on_error)
+        worker.finished.connect(worker.deleteLater)
+        worker.start()
+        self._worker = worker
 
     def _on_data(self, data: dict, history: list):
+        # Guard: only process if we're still alive
+        if not self._worker:
+            return
         self._data    = data
         self._history = history
         self._error   = None
         self._check_alerts(data)
         self.update()
 
-        # Update dynamic tray icon color
         mmol = data.get("mmol", 0.0)
         minutes_ago = data.get("minutes_ago", 999)
         stale = minutes_ago > STALE_MINUTES
@@ -598,21 +676,25 @@ class GlucoseWidget(QWidget):
             )
 
     # ------------------------------------------------------------------
-    # GitHub Updates
+    # GitHub Updates (called only from AboutDialog)
     # ------------------------------------------------------------------
     def _check_updates(self, interactive: bool = False):
         if self._update_worker and self._update_worker.isRunning():
             return
-        self._update_worker = UpdateCheckerWorker(APP_VERSION)
-        self._update_worker.update_result.connect(
+        worker = UpdateCheckerWorker(APP_VERSION)
+        worker.update_result.connect(
             lambda has_upd, tag, body, url: self._on_update_result(has_upd, tag, body, url, interactive)
         )
         if interactive:
-            self._update_worker.error_signal.connect(
-                lambda err: QMessageBox.warning(self, "Проверка обновлений", f"Не удалось проверить обновления: {err}")
+            worker.error_signal.connect(
+                lambda err: QMessageBox.warning(
+                    self, "Проверка обновлений",
+                    f"Не удалось проверить обновления:\n{err}"
+                )
             )
-        self._update_worker.finished.connect(self._update_worker.deleteLater)
-        self._update_worker.start()
+        worker.finished.connect(worker.deleteLater)
+        worker.start()
+        self._update_worker = worker
 
     def _on_update_result(self, has_update: bool, tag: str, body: str, url: str, interactive: bool):
         if has_update:
@@ -627,7 +709,8 @@ class GlucoseWidget(QWidget):
                 webbrowser.open(url)
         elif interactive:
             QMessageBox.information(
-                self, "Обновлений не найдено", f"У вас установлена последняя версия {APP_VERSION}."
+                self, "Обновлений не найдено",
+                f"У вас установлена последняя версия {APP_VERSION}."
             )
 
     # ------------------------------------------------------------------
@@ -739,35 +822,42 @@ class GlucoseWidget(QWidget):
         )
 
     def _draw_sparkline(self, painter: QPainter):
-        """Draw 4-hour history sparkline with colored dots."""
+        """Draw 4-hour history sparkline with colored dots.
+        Dot color is based on glucose value only (stale flag is NOT used here —
+        historical points are never 'stale' by definition).
+        """
         if not self._history or len(self._history) < 2:
             return
 
         GX, GY, GW, GH = 10, 85, 200, 48
 
+        # Determine Y-axis range
         min_val = 2.5
         max_val = 14.0
         for r in self._history:
             v = float(r.get("mmol", 5.5))
-            if v < min_val: min_val = max(1.5, v - 0.5)
-            if v > max_val: max_val = min(22.0, v + 1.0)
+            if v < min_val:
+                min_val = max(1.5, v - 0.5)
+            if v > max_val:
+                max_val = min(22.0, v + 1.0)
+
+        val_range = max(0.1, max_val - min_val)
 
         def val_to_y(v: float) -> float:
-            ratio = (v - min_val) / (max_val - min_val)
+            ratio = (v - min_val) / val_range
             return GY + GH - (ratio * GH)
 
         # Target range guides (3.9 and 9.0 mmol/L)
-        y_39 = val_to_y(3.9)
-        y_90 = val_to_y(9.0)
-
+        y_lo = val_to_y(3.9)
+        y_hi = val_to_y(9.0)
         painter.setPen(QPen(QColor(255, 255, 255, 35), 1, Qt.PenStyle.DashLine))
-        if GY <= y_39 <= GY + GH:
-            painter.drawLine(GX, int(y_39), GX + GW, int(y_39))
-        if GY <= y_90 <= GY + GH:
-            painter.drawLine(GX, int(y_90), GX + GW, int(y_90))
+        if GY <= y_lo <= GY + GH:
+            painter.drawLine(GX, int(y_lo), GX + GW, int(y_lo))
+        if GY <= y_hi <= GY + GH:
+            painter.drawLine(GX, int(y_hi), GX + GW, int(y_hi))
 
         t_start = self._history[0].get("timestamp", 0)
-        t_end   = self._history[-1].get("timestamp", 0)
+        t_end   = self._history[-1].get("timestamp", t_start)
         t_span  = max(1, t_end - t_start)
 
         points = []
@@ -776,18 +866,18 @@ class GlucoseWidget(QWidget):
             v  = float(r.get("mmol", 5.5))
             px = GX + int((ts - t_start) / t_span * GW)
             py = int(val_to_y(v))
-            stale = (t_end - ts) > STALE_MINUTES * 60
-            points.append((px, py, v, stale))
+            # Historical points are colored by glucose level only, never gray
+            dot_color = glucose_color(v, stale=False)
+            points.append((px, py, dot_color))
 
-        # Connecting path
+        # Connecting line
         painter.setPen(QPen(QColor(200, 200, 200, 70), 1.2))
         for i in range(len(points) - 1):
-            p1, p2 = points[i], points[i+1]
+            p1, p2 = points[i], points[i + 1]
             painter.drawLine(p1[0], p1[1], p2[0], p2[1])
 
         # Color-coded dots
-        for px, py, v, stale in points:
-            dot_color = glucose_color(v, stale)
+        for px, py, dot_color in points:
             painter.setPen(QPen(dot_color.darker(120), 1))
             painter.setBrush(QBrush(dot_color))
             painter.drawEllipse(QPoint(px, py), 3, 3)
@@ -807,12 +897,15 @@ class GlucoseWidget(QWidget):
 
     def mouseReleaseEvent(self, _event):
         self._drag_pos = None
-        s = get_settings()
-        s.setValue("position", self.pos())
-        s.sync()
+        try:
+            s = get_settings()
+            s.setValue("position", self.pos())
+            s.sync()
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
-    # Context menu
+    # Context menu (right-click on widget)
     # ------------------------------------------------------------------
     def _show_context_menu(self, global_pos: QPoint):
         menu = QMenu(self)
@@ -820,15 +913,14 @@ class GlucoseWidget(QWidget):
         menu.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
         entries = [
-            ("Обновить сейчас",           self._fetch),
-            ("Ввести (Инсулин/Углеводы)", self._open_treatments),
-            ("Свернуть в трей",           self._hide_to_tray),
+            ("Обновить сейчас",      self._fetch),
+            ("Ввести данные терапии", self._open_treatments),
+            ("Свернуть в трей",      self._hide_to_tray),
             None,
-            ("Проверить обновления…",     self.lambda_check_updates),
-            ("Настройки…",                self._open_settings),
-            ("О программе",               self._open_about),
+            ("Настройки…",           self._open_settings),
+            ("О программе",          self._open_about),
             None,
-            ("Выход",                     self._confirm_and_quit),
+            ("Выход",                self._confirm_and_quit),
         ]
         for item in entries:
             if item is None:
