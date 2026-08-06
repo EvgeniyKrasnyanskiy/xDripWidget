@@ -106,6 +106,15 @@ def init_db() -> None:
             log.info("Migration: added uuid column to treatments")
         except sqlite3.OperationalError:
             pass
+        # Assign UUIDs to any existing treatments that lack one
+        try:
+            rows_no_uuid = conn.execute("SELECT id FROM treatments WHERE uuid = '' OR uuid IS NULL").fetchall()
+            for r in rows_no_uuid:
+                conn.execute("UPDATE treatments SET uuid = ? WHERE id = ?", (str(uuid.uuid4()), r["id"]))
+            if rows_no_uuid:
+                log.info("Migration: assigned UUIDs to %d existing treatments", len(rows_no_uuid))
+        except Exception as e:
+            log.warning("Migration uuid backfill error: %s", e)
         try:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_treatments_uuid ON treatments(uuid)")
         except sqlite3.OperationalError:
@@ -390,10 +399,14 @@ def get_treatments(request: Request, limit: int = 50):
     conn = get_db()
     try:
         if target_uuid:
+            # Filter by uuid ONLY — do NOT fallback to integer id.
+            # xDrip+ sends find[uuid]=1 as a probe; matching id=1 would cause
+            # deleted treatments to reappear.
             rows = conn.execute(
-                "SELECT id, uuid, eventType, insulin, carbs, notes, timestamp FROM treatments WHERE uuid = ? OR id = ?",
-                (str(target_uuid), str(target_uuid)),
+                "SELECT id, uuid, eventType, insulin, carbs, notes, timestamp FROM treatments WHERE uuid = ?",
+                (str(target_uuid),),
             ).fetchall()
+            log.debug("GET treatments filter uuid=%s → %d rows", target_uuid, len(rows))
         elif min_ts:
             rows = conn.execute(
                 "SELECT id, uuid, eventType, insulin, carbs, notes, timestamp FROM treatments WHERE timestamp >= ? ORDER BY timestamp DESC LIMIT ?",
@@ -513,9 +526,9 @@ def delete_treatment_by_path(treatment_id: str):
     deleted = 0
     try:
         with conn:
-            cur = conn.execute("DELETE FROM treatments WHERE uuid = ? OR id = ?", (tid, tid))
+            cur = conn.execute("DELETE FROM treatments WHERE uuid = ?", (tid,))
             deleted = cur.rowcount
-            log.info("Treatment deleted via path: id/uuid=%s (rows=%d)", tid, deleted)
+            log.info("Treatment deleted via path: uuid=%s (rows=%d)", tid, deleted)
     finally:
         conn.close()
     return {"deleted": deleted}
@@ -543,9 +556,9 @@ def delete_treatment_by_query(request: Request):
     try:
         with conn:
             if tid:
-                cur = conn.execute("DELETE FROM treatments WHERE uuid = ? OR id = ?", (str(tid), str(tid)))
+                cur = conn.execute("DELETE FROM treatments WHERE uuid = ?", (str(tid),))
                 deleted = cur.rowcount
-                log.info("Treatment deleted via query: id/uuid=%s (rows=%d)", tid, deleted)
+                log.info("Treatment deleted via query: uuid=%s (rows=%d)", tid, deleted)
             else:
                 log.warning("DELETE /treatments called without id/uuid in params: %s", params)
     finally:
@@ -603,16 +616,16 @@ async def put_treatments(request: Request, treatment_id: Optional[str] = None):
                     event_type = str(raw.get("eventType", "Meal Bolus") or "Meal Bolus")
 
                     if raw.get("isVoided") or raw.get("eventType") == "Void" or raw.get("notes") == "Voided":
-                        cur = conn.execute("DELETE FROM treatments WHERE uuid = ? OR id = ?", (tid, tid))
+                        cur = conn.execute("DELETE FROM treatments WHERE uuid = ?", (tid,))
                         updated += cur.rowcount
-                        log.info("Treatment voided/deleted via PUT: id/uuid=%s", tid)
+                        log.info("Treatment voided/deleted via PUT: uuid=%s", tid)
                     else:
                         cur = conn.execute(
-                            "UPDATE treatments SET eventType = ?, insulin = ?, carbs = ?, notes = ? WHERE uuid = ? OR id = ?",
-                            (event_type, insulin, carbs, notes, tid, tid),
+                            "UPDATE treatments SET eventType = ?, insulin = ?, carbs = ?, notes = ? WHERE uuid = ?",
+                            (event_type, insulin, carbs, notes, tid),
                         )
                         updated += cur.rowcount
-                        log.info("Treatment updated via PUT: id/uuid=%s Insulin=%.1f Carbs=%.1f", tid, insulin, carbs)
+                        log.info("Treatment updated via PUT: uuid=%s Insulin=%.1f Carbs=%.1f", tid, insulin, carbs)
     finally:
         conn.close()
 
