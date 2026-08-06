@@ -509,18 +509,18 @@ def get_treatments(request: Request, limit: int = 50):
     for r in rows:
         ts_ms = r["timestamp"] * 1000
         item_uuid = r["uuid"] if r["uuid"] else str(r["id"])
-        is_void = bool(r["is_voided"] or r["eventType"] == "Void")
+        is_void = bool(r["is_voided"])
         iso_time = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(r["timestamp"]))
         item = {
             "_id": item_uuid,
             "uuid": item_uuid,
             "sysid": item_uuid,
-            "eventType": "Void" if is_void else r["eventType"],
+            "eventType": r["eventType"],
             "isVoided": is_void,
             "isValidated": not is_void,
             "insulin": 0.0 if is_void else r["insulin"],
             "carbs": 0.0 if is_void else r["carbs"],
-            "notes": "Voided" if is_void else r["notes"],
+            "notes": "" if is_void else r["notes"],
             "created_at": iso_time,
             "createdAt": iso_time,
             "mills": ts_ms,
@@ -545,13 +545,13 @@ def _mark_voided(conn: sqlite3.Connection, tid: str) -> int:
         conn.execute("DELETE FROM entries WHERE type = 'mbg' AND timestamp >= ? AND timestamp <= ?", (ts - 10, ts + 10))
 
     cur = conn.execute(
-        "UPDATE treatments SET is_voided = 1, eventType = 'Void', carbs = 0.0, insulin = 0.0, notes = 'Voided' WHERE uuid = ? OR id = ?",
+        "UPDATE treatments SET is_voided = 1, carbs = 0.0, insulin = 0.0, glucose = NULL WHERE uuid = ? OR id = ?",
         (tid, tid),
     )
     if cur.rowcount == 0:
         conn.execute(
             "INSERT INTO treatments (uuid, eventType, insulin, carbs, notes, timestamp, is_voided) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (tid, "Void", 0.0, 0.0, "Voided", int(time.time()), 1),
+            (tid, "Void", 0.0, 0.0, "", int(time.time()), 1),
         )
         return 1
     return cur.rowcount
