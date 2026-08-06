@@ -107,7 +107,7 @@ logger.info("=================== xDrip Widget Initializing ===================")
 # Constants
 # ---------------------------------------------------------------------------
 APP_NAME     = "xDrip Widget"
-APP_VERSION  = "1.4.1"
+APP_VERSION  = "1.4.2"
 ORG_NAME     = "xdripwidget"
 INSTANCE_KEY = "xDripWidgetSingleInstance"
 DEFAULT_URL  = "http://localhost:8080"
@@ -301,6 +301,15 @@ class UpdateCheckerWorker(QThread):
             self.error_signal.emit(str(exc))
 
 
+EVENT_TYPES_MAP: dict[str, str] = {
+    "Приём пищи (Углеводы + Инсулин)": "Meal Bolus",
+    "Коррекция инсулином": "Correction Bolus",
+    "Перекус / Углеводы": "Carb Intake",
+    "Замер сахара крови": "BG Check",
+    "Заметка": "Note",
+}
+
+
 # ---------------------------------------------------------------------------
 # Treatments dialog (Insulin, Carbs, Blood Glucose input + datetime)
 # ---------------------------------------------------------------------------
@@ -309,7 +318,7 @@ class TreatmentDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Ввод данных терапии")
         self.setModal(True)
-        self.resize(360, 280)
+        self.resize(380, 300)
         self._base_url = base_url
         self._api_secret = api_secret
 
@@ -334,13 +343,7 @@ class TreatmentDialog(QDialog):
 
         # --- Event type ---
         self._event_type_combo = QComboBox()
-        self._event_type_combo.addItems([
-            "Meal Bolus",
-            "Correction Bolus",
-            "Carb Intake",
-            "BG Check",
-            "Note",
-        ])
+        self._event_type_combo.addItems(list(EVENT_TYPES_MAP.keys()))
 
         # --- Notes ---
         self._notes_edit = QLineEdit()
@@ -372,19 +375,45 @@ class TreatmentDialog(QDialog):
 
         self._event_type_combo.currentTextChanged.connect(self._on_event_type_changed)
 
-    def _on_event_type_changed(self, event_type: str):
-        is_bg_check = (event_type == "BG Check")
-        self._carbs_spin.setEnabled(not is_bg_check or self._carbs_spin.value() > 0)
-        self._insulin_spin.setEnabled(not is_bg_check or self._insulin_spin.value() > 0)
+    def _on_event_type_changed(self, label: str):
+        event_type = EVENT_TYPES_MAP.get(label, "Meal Bolus")
+        if event_type == "BG Check":
+            self._carbs_spin.setEnabled(False)
+            self._carbs_spin.setValue(0)
+            self._insulin_spin.setEnabled(False)
+            self._insulin_spin.setValue(0)
+            self._glucose_spin.setEnabled(True)
+        elif event_type == "Note":
+            self._carbs_spin.setEnabled(False)
+            self._carbs_spin.setValue(0)
+            self._insulin_spin.setEnabled(False)
+            self._insulin_spin.setValue(0)
+            self._glucose_spin.setEnabled(False)
+            self._glucose_spin.setValue(0)
+        elif event_type == "Correction Bolus":
+            self._carbs_spin.setEnabled(False)
+            self._carbs_spin.setValue(0)
+            self._insulin_spin.setEnabled(True)
+            self._glucose_spin.setEnabled(True)
+        else:  # Meal Bolus / Carb Intake
+            self._carbs_spin.setEnabled(True)
+            self._insulin_spin.setEnabled(True)
+            self._glucose_spin.setEnabled(True)
 
     def _submit(self):
         carbs   = self._carbs_spin.value()
         insulin = self._insulin_spin.value()
         glucose = self._glucose_spin.value()
-        event_type = self._event_type_combo.currentText()
+        event_label = self._event_type_combo.currentText()
+        event_type = EVENT_TYPES_MAP.get(event_label, "Meal Bolus")
+        notes = self._notes_edit.text().strip()
 
-        if carbs <= 0 and insulin <= 0 and glucose <= 0:
-            QMessageBox.warning(self, "Внимание", "Укажите хотя бы одно значение: глюкоза, углеводы или инсулин.")
+        if event_type == "Note" and not notes:
+            QMessageBox.warning(self, "Внимание", "Для типа 'Заметка' введите текст заметки.")
+            return
+
+        if carbs <= 0 and insulin <= 0 and glucose <= 0 and not notes:
+            QMessageBox.warning(self, "Внимание", "Укажите хотя бы одно значение: глюкоза, углеводы, инсулин или заметку.")
             return
 
         qdt = self._datetime_edit.dateTime()
@@ -397,7 +426,7 @@ class TreatmentDialog(QDialog):
             "eventType": event_type,
             "carbs": carbs,
             "insulin": insulin,
-            "notes": self._notes_edit.text().strip(),
+            "notes": notes,
             "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(ts)),
             "date": ts * 1000,
         }
