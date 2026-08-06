@@ -107,7 +107,7 @@ logger.info("=================== xDrip Widget Initializing ===================")
 # Constants
 # ---------------------------------------------------------------------------
 APP_NAME     = "xDrip Widget"
-APP_VERSION  = "1.4.2"
+APP_VERSION  = "1.4.3"
 ORG_NAME     = "xdripwidget"
 INSTANCE_KEY = "xDripWidgetSingleInstance"
 DEFAULT_URL  = "http://localhost:8080"
@@ -455,6 +455,15 @@ class TreatmentDialog(QDialog):
             QMessageBox.critical(self, "Ошибка", f"Не удалось отправить данные:\n{e}")
 
 
+REVERSE_EVENT_TYPES_MAP: dict[str, str] = {
+    "Meal Bolus": "Приём пищи",
+    "Correction Bolus": "Коррекция",
+    "Carb Intake": "Перекус",
+    "BG Check": "Замер сахара",
+    "Note": "Заметка",
+}
+
+
 # ---------------------------------------------------------------------------
 # Treatment History Viewer & Deletion Dialog
 # ---------------------------------------------------------------------------
@@ -463,13 +472,13 @@ class TreatmentHistoryDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("История терапий (Удаление с сервера)")
         self.setModal(True)
-        self.resize(540, 340)
+        self.resize(560, 340)
         self._base_url = base_url
         self._api_secret = api_secret
 
         self._table = QTableWidget()
         self._table.setColumnCount(5)
-        self._table.setHorizontalHeaderLabels(["Дата / Время", "Тип / Заметка", "Углеводы", "Инсулин", "Действие"])
+        self._table.setHorizontalHeaderLabels(["Дата / Время", "Тип / Данные", "Углеводы", "Инсулин", "Действие"])
         self._table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
 
@@ -515,9 +524,28 @@ class TreatmentHistoryDialog(QDialog):
             ts = ts_ms // 1000 if ts_ms > 1e10 else (item.get("timestamp") or int(time.time()))
             dt_str = datetime.fromtimestamp(ts).strftime("%d.%m.%Y %H:%M")
 
-            event_type = item.get("eventType", "")
+            raw_event_type = item.get("eventType", "")
+            event_type_ru = REVERSE_EVENT_TYPES_MAP.get(raw_event_type, raw_event_type)
+
             notes = item.get("notes", "")
-            type_str = f"{event_type}" + (f" ({notes})" if notes else "")
+
+            # Format glucose value if present
+            g_str = ""
+            raw_glucose = item.get("glucose")
+            if raw_glucose is not None:
+                try:
+                    g_val = float(raw_glucose)
+                    if g_val > 0:
+                        units = str(item.get("units", "")).lower()
+                        if "mg" in units or g_val > 35.0:
+                            g_mmol = round(g_val / 18.0182, 1)
+                        else:
+                            g_mmol = round(g_val, 1)
+                        g_str = f" [{g_mmol:.1f} ммоль/л]"
+                except (ValueError, TypeError):
+                    pass
+
+            type_str = f"{event_type_ru}{g_str}" + (f" ({notes})" if notes else "")
 
             carbs = item.get("carbs", 0.0)
             carbs_str = f"{carbs:.1f} г" if carbs > 0 else "—"
