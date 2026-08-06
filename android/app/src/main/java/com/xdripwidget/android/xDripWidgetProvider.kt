@@ -2,9 +2,11 @@ package com.xdripwidget.android
 
 import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProvider
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.util.Log
+import android.widget.RemoteViews
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
@@ -27,7 +29,25 @@ class xDripWidgetProvider : AppWidgetProvider() {
         super.onReceive(context, intent)
         if (intent.action == ACTION_MANUAL_REFRESH) {
             Log.d(TAG, "Manual refresh click received")
+            // Immediate visual feedback
+            showRefreshingState(context)
             enqueueOneTimeUpdate(context)
+        }
+    }
+
+    private fun showRefreshingState(context: Context) {
+        try {
+            val appWidgetManager = AppWidgetManager.getInstance(context)
+            val componentName = ComponentName(context, xDripWidgetProvider::class.java)
+            val appWidgetIds = appWidgetManager.getAppWidgetIds(componentName)
+
+            for (appWidgetId in appWidgetIds) {
+                val views = RemoteViews(context.packageName, R.layout.widget_layout_4x1)
+                views.setTextViewText(R.id.tv_time, "Обновление...")
+                appWidgetManager.partiallyUpdateAppWidget(appWidgetId, views)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error showing refreshing state: ${e.message}")
         }
     }
 
