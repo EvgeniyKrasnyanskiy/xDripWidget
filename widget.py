@@ -107,7 +107,7 @@ logger.info("=================== xDrip Widget Initializing ===================")
 # Constants
 # ---------------------------------------------------------------------------
 APP_NAME     = "xDrip Widget"
-APP_VERSION  = "1.4.3"
+APP_VERSION  = "1.4.4"
 ORG_NAME     = "xdripwidget"
 INSTANCE_KEY = "xDripWidgetSingleInstance"
 DEFAULT_URL  = "http://localhost:8080"
@@ -472,13 +472,13 @@ class TreatmentHistoryDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("История терапий (Удаление с сервера)")
         self.setModal(True)
-        self.resize(560, 340)
+        self.resize(640, 340)
         self._base_url = base_url
         self._api_secret = api_secret
 
         self._table = QTableWidget()
-        self._table.setColumnCount(5)
-        self._table.setHorizontalHeaderLabels(["Дата / Время", "Тип / Данные", "Углеводы", "Инсулин", "Действие"])
+        self._table.setColumnCount(6)
+        self._table.setHorizontalHeaderLabels(["Дата / Время", "Тип события", "Глюкоза", "Углеводы", "Инсулин", "Действие"])
         self._table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
 
@@ -528,9 +528,10 @@ class TreatmentHistoryDialog(QDialog):
             event_type_ru = REVERSE_EVENT_TYPES_MAP.get(raw_event_type, raw_event_type)
 
             notes = item.get("notes", "")
+            type_str = f"{event_type_ru}" + (f" ({notes})" if notes else "")
 
-            # Format glucose value if present
-            g_str = ""
+            # Format glucose value into dedicated column
+            glucose_str = "—"
             raw_glucose = item.get("glucose")
             if raw_glucose is not None:
                 try:
@@ -541,11 +542,9 @@ class TreatmentHistoryDialog(QDialog):
                             g_mmol = round(g_val / 18.0182, 1)
                         else:
                             g_mmol = round(g_val, 1)
-                        g_str = f" [{g_mmol:.1f} ммоль/л]"
+                        glucose_str = f"{g_mmol:.1f} ммоль/л"
                 except (ValueError, TypeError):
                     pass
-
-            type_str = f"{event_type_ru}{g_str}" + (f" ({notes})" if notes else "")
 
             carbs = item.get("carbs", 0.0)
             carbs_str = f"{carbs:.1f} г" if carbs > 0 else "—"
@@ -557,13 +556,14 @@ class TreatmentHistoryDialog(QDialog):
 
             self._table.setItem(row_idx, 0, QTableWidgetItem(dt_str))
             self._table.setItem(row_idx, 1, QTableWidgetItem(type_str))
-            self._table.setItem(row_idx, 2, QTableWidgetItem(carbs_str))
-            self._table.setItem(row_idx, 3, QTableWidgetItem(insulin_str))
+            self._table.setItem(row_idx, 2, QTableWidgetItem(glucose_str))
+            self._table.setItem(row_idx, 3, QTableWidgetItem(carbs_str))
+            self._table.setItem(row_idx, 4, QTableWidgetItem(insulin_str))
 
             btn_del = QPushButton("Удалить")
             btn_del.setStyleSheet("background-color: #e74c3c; color: white; border-radius: 3px; font-weight: bold;")
             btn_del.clicked.connect(lambda _, uid=item_uuid, c=carbs, i=insulin: self._delete_item(uid, c, i))
-            self._table.setCellWidget(row_idx, 4, btn_del)
+            self._table.setCellWidget(row_idx, 5, btn_del)
             row_idx += 1
 
     def _delete_item(self, item_uuid: str, carbs: float, insulin: float):
