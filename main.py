@@ -472,18 +472,24 @@ def get_treatments(request: Request, limit: int = 50):
     """Nightscout-compatible treatments endpoint (returns recent boluses & carbs for xDrip+)."""
     params = dict(request.query_params)
     target_uuid = params.get("find[uuid]") or params.get("find[_id]") or params.get("find[sysid]") or params.get("uuid") or params.get("_id")
+    min_ts_raw = (
+        params.get("find[createdAt][$gte]")
+        or params.get("find[created_at][$gte]")
+        or params.get("find[date][$gte]")
+        or params.get("find[mills][$gte]")
+        or params.get("find[timestamp][$gte]")
+    )
     min_ts = None
-    if params.get("find[createdAt][$gte]"):
-        val = params.get("find[createdAt][$gte]")
-        if val and val.isdigit():
-            min_ts = int(val) // 1000 if int(val) > 1e10 else int(val)
+    if min_ts_raw and str(min_ts_raw).isdigit():
+        val_i = int(min_ts_raw)
+        min_ts = val_i // 1000 if val_i > 1e10 else val_i
 
     conn = get_db()
     try:
         if target_uuid:
             rows = conn.execute(
-                "SELECT id, uuid, eventType, insulin, carbs, notes, timestamp, glucose, is_voided FROM treatments WHERE uuid = ?",
-                (str(target_uuid),),
+                "SELECT id, uuid, eventType, insulin, carbs, notes, timestamp, glucose, is_voided FROM treatments WHERE uuid = ? OR id = ?",
+                (str(target_uuid), str(target_uuid)),
             ).fetchall()
             log.debug("GET treatments filter uuid=%s → %d rows", target_uuid, len(rows))
         elif min_ts:
@@ -514,14 +520,18 @@ def get_treatments(request: Request, limit: int = 50):
             "isValidated": not is_void,
             "insulin": 0.0 if is_void else r["insulin"],
             "carbs": 0.0 if is_void else r["carbs"],
-            "notes": "" if is_void else r["notes"],
+            "notes": "Voided" if is_void else r["notes"],
             "created_at": iso_time,
             "createdAt": iso_time,
             "mills": ts_ms,
             "timestamp": ts_ms,
+            "enteredBy": "xDripWidget",
         }
         if r["glucose"] is not None and not is_void:
-            item["glucose"] = r["glucose"]
+            g_mgdl = r["glucose"]
+            item["glucose"] = g_mgdl
+            item["mgdl"] = g_mgdl
+            item["mbg"] = g_mgdl
             item["units"] = "mg/dl"
             item["glucoseType"] = "Finger"
         result.append(item)
