@@ -95,7 +95,6 @@ def init_db() -> None:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_entries_ts    ON entries(timestamp DESC)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_devstatus_ts  ON devicestatus(timestamp DESC)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_treatments_ts ON treatments(timestamp DESC)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_treatments_uuid ON treatments(uuid)")
         # --- migrations ---
         try:
             conn.execute("ALTER TABLE devicestatus ADD COLUMN battery INTEGER NOT NULL DEFAULT -1")
@@ -105,6 +104,10 @@ def init_db() -> None:
         try:
             conn.execute("ALTER TABLE treatments ADD COLUMN uuid TEXT NOT NULL DEFAULT ''")
             log.info("Migration: added uuid column to treatments")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_treatments_uuid ON treatments(uuid)")
         except sqlite3.OperationalError:
             pass
     conn.close()
