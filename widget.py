@@ -13,6 +13,7 @@ Features:
   - Dynamic blood-drop tray icon (color-coded by glucose state)
   - 4-hour glucose history sparkline graph
   - Treatments logging (Carbs / Insulin / Blood Glucose) to server
+  - Treatments history viewer & delete dialog
   - GitHub update checker (in About dialog only)
   - Exit confirmation dialog
   - Debug logging with 1MB rotating file handler (widget.log)
@@ -54,6 +55,7 @@ from PyQt6.QtGui import (
 )
 from PyQt6.QtNetwork import QLocalServer, QLocalSocket
 from PyQt6.QtWidgets import (
+    QAbstractItemView,
     QApplication,
     QComboBox,
     QDateTimeEdit,
@@ -62,12 +64,16 @@ from PyQt6.QtWidgets import (
     QDoubleSpinBox,
     QFormLayout,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QMenu,
     QMessageBox,
+    QPushButton,
     QSlider,
     QSystemTrayIcon,
+    QTableWidget,
+    QTableWidgetItem,
     QTextBrowser,
     QVBoxLayout,
     QWidget,
@@ -101,7 +107,7 @@ logger.info("=================== xDrip Widget Initializing ===================")
 # Constants
 # ---------------------------------------------------------------------------
 APP_NAME     = "xDrip Widget"
-APP_VERSION  = "1.3.3"
+APP_VERSION  = "1.4.0"
 ORG_NAME     = "xdripwidget"
 INSTANCE_KEY = "xDripWidgetSingleInstance"
 DEFAULT_URL  = "http://localhost:8080"
@@ -421,6 +427,118 @@ class TreatmentDialog(QDialog):
 
 
 # ---------------------------------------------------------------------------
+# Treatment History Viewer & Deletion Dialog
+# ---------------------------------------------------------------------------
+class TreatmentHistoryDialog(QDialog):
+    def __init__(self, base_url: str, api_secret: str = "", parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("История терапий (Удаление с сервера)")
+        self.setModal(True)
+        self.resize(540, 340)
+        self._base_url = base_url
+        self._api_secret = api_secret
+
+        self._table = QTableWidget()
+        self._table.setColumnCount(5)
+        self._table.setHorizontalHeaderLabels(["Дата / Время", "Тип / Заметка", "Углеводы", "Инсулин", "Действие"])
+        self._table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+
+        btn_refresh = QPushButton("Обновить список")
+        btn_refresh.clicked.connect(self._load_treatments)
+        btn_close = QPushButton("Закрыть")
+        btn_close.clicked.connect(self.accept)
+
+        btn_layout = QHBoxLayout()
+        btn_layout.addWidget(btn_refresh)
+        btn_layout.addStretch()
+        btn_layout.addWidget(btn_close)
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(self._table)
+        layout.addLayout(btn_layout)
+
+        self._load_treatments()
+
+    def _load_treatments(self):
+        url = self._base_url.rstrip("/") + "/api/v1/treatments?limit=40"
+        if self._api_secret:
+            url += f"&token={self._api_secret}"
+
+        try:
+            req = urllib.request.Request(url, headers={"Accept": "application/json"})
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                items = json.loads(resp.read().decode())
+            self._populate_table(items)
+        except Exception as e:
+            logger.error(f"Error loading treatments history: {e}")
+            QMessageBox.warning(self, "Ошибка", f"Не удалось загрузить историю терапий:\n{e}")
+
+    def _populate_table(self, items: list):
+        self._table.setRowCount(0)
+        for row_idx, item in enumerate(items):
+            self._table.insertRow(row_idx)
+
+            ts_ms = item.get("mills") or item.get("date") or 0
+            ts = ts_ms // 1000 if ts_ms > 1e10 else (item.get("timestamp") or int(time.time()))
+            dt_str = datetime.fromtimestamp(ts).strftime("%d.%m.%Y %H:%M")
+
+            event_type = item.get("eventType", "")
+            notes = item.get("notes", "")
+            type_str = f"{event_type}" + (f" ({notes})" if notes else "")
+
+            carbs = item.get("carbs", 0.0)
+            carbs_str = f"{carbs:.1f} г" if carbs > 0 else "—"
+
+            insulin = item.get("insulin", 0.0)
+            insulin_str = f"{insulin:.2f} ЕД" if insulin > 0 else "—"
+
+            item_uuid = str(item.get("uuid") or item.get("_id") or item.get("id", ""))
+
+            self._table.setItem(row_idx, 0, QTableWidgetItem(dt_str))
+            self._table.setItem(row_idx, 1, QTableWidgetItem(type_str))
+            self._table.setItem(row_idx, 2, QTableWidgetItem(carbs_str))
+            self._table.setItem(row_idx, 3, QTableWidgetItem(insulin_str))
+
+            btn_del = QPushButton("Удалить")
+            btn_del.setStyleSheet("background-color: #e74c3c; color: white; border-radius: 3px; font-weight: bold;")
+            btn_del.clicked.connect(lambda _, uid=item_uuid, c=carbs, i=insulin: self._delete_item(uid, c, i))
+            self._table.setCellWidget(row_idx, 4, btn_del)
+
+    def _delete_item(self, item_uuid: str, carbs: float, insulin: float):
+        if not item_uuid:
+            QMessageBox.warning(self, "Ошибка", "У данной записи отсутствует UUID/ID.")
+            return
+
+        msg = f"Вы действительно хотите навсегда удалить эту запись с сервера?\n\nУглеводы: {carbs}г  |  Инсулин: {insulin}ЕД\nUUID: {item_uuid}"
+        reply = QMessageBox.question(
+            self, "Подтверждение удаления", msg,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        url = self._base_url.rstrip("/") + f"/api/v1/treatments/{item_uuid}"
+        if self._api_secret:
+            url += f"?token={self._api_secret}"
+
+        try:
+            req = urllib.request.Request(url, method="DELETE")
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                pass
+            logger.info(f"Treatment deleted via dialog: uuid={item_uuid}")
+            QMessageBox.information(
+                self, "Удалено",
+                "Запись терапии успешно удалена с сервера!\nВ xDrip+ она исчезнет при следующем опросе."
+            )
+            self._load_treatments()
+        except Exception as e:
+            logger.error(f"Failed to delete treatment via dialog: {e}")
+            QMessageBox.critical(self, "Ошибка", f"Не удалось удалить запись с сервера:\n{e}")
+
+
+# ---------------------------------------------------------------------------
 # Settings dialog
 # ---------------------------------------------------------------------------
 class SettingsDialog(QDialog):
@@ -587,6 +705,7 @@ class GlucoseWidget(QWidget):
             ("Показать / скрыть",          self._toggle_visibility),
             ("Обновить сейчас",            self._fetch),
             ("Ввести данные терапии",      self._open_treatments),
+            ("История / Удаление терапий", self._open_treatment_history),
         ]:
             a = QAction(label, self)
             a.triggered.connect(slot)
@@ -635,7 +754,6 @@ class GlucoseWidget(QWidget):
     def _fetch(self):
         logger.debug("_fetch() invoked")
 
-        # Safely clean up previous worker if finished or running
         if self._worker is not None:
             if self._worker.isRunning():
                 logger.debug("_fetch(): previous worker is still running, cancelling it")
@@ -645,7 +763,7 @@ class GlucoseWidget(QWidget):
                     self._worker.fetch_error.disconnect()
                 except Exception:
                     pass
-                return  # skip this poll tick, next tick will start fresh
+                return
             else:
                 logger.debug("_fetch(): cleaning up finished worker reference")
                 self._worker = None
@@ -972,14 +1090,15 @@ class GlucoseWidget(QWidget):
         menu.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
         entries = [
-            ("Обновить сейчас",      self._fetch),
-            ("Ввести данные терапии", self._open_treatments),
-            ("Свернуть в трей",      self._hide_to_tray),
+            ("Обновить сейчас",            self._fetch),
+            ("Ввести данные терапии",      self._open_treatments),
+            ("История / Удаление терапий", self._open_treatment_history),
+            ("Свернуть в трей",            self._hide_to_tray),
             None,
-            ("Настройки…",           self._open_settings),
-            ("О программе",          self._open_about),
+            ("Настройки…",                 self._open_settings),
+            ("О программе",                self._open_about),
             None,
-            ("Выход",                self._confirm_and_quit),
+            ("Выход",                      self._confirm_and_quit),
         ]
         for item in entries:
             if item is None:
@@ -1026,6 +1145,13 @@ class GlucoseWidget(QWidget):
         url = str(s.value("server_url", DEFAULT_URL))
         secret = str(s.value("api_secret", ""))
         dlg = TreatmentDialog(url, secret, self)
+        dlg.exec()
+
+    def _open_treatment_history(self):
+        s = get_settings()
+        url = str(s.value("server_url", DEFAULT_URL))
+        secret = str(s.value("api_secret", ""))
+        dlg = TreatmentHistoryDialog(url, secret, self)
         dlg.exec()
 
     def _open_about(self):
