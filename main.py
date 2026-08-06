@@ -89,6 +89,7 @@ def init_db() -> None:
                 carbs     REAL    NOT NULL DEFAULT 0.0,
                 notes     TEXT    NOT NULL DEFAULT '',
                 timestamp INTEGER NOT NULL,
+                glucose   REAL    DEFAULT NULL,
                 is_voided INTEGER NOT NULL DEFAULT 0
             )
             """
@@ -110,6 +111,11 @@ def init_db() -> None:
         try:
             conn.execute("ALTER TABLE treatments ADD COLUMN is_voided INTEGER NOT NULL DEFAULT 0")
             log.info("Migration: added is_voided column to treatments")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            conn.execute("ALTER TABLE treatments ADD COLUMN glucose REAL DEFAULT NULL")
+            log.info("Migration: added glucose column to treatments")
         except sqlite3.OperationalError:
             pass
         # Assign UUIDs to any existing treatments that lack one
@@ -406,18 +412,18 @@ def get_treatments(request: Request, limit: int = 50):
     try:
         if target_uuid:
             rows = conn.execute(
-                "SELECT id, uuid, eventType, insulin, carbs, notes, timestamp, is_voided FROM treatments WHERE uuid = ?",
+                "SELECT id, uuid, eventType, insulin, carbs, notes, timestamp, glucose, is_voided FROM treatments WHERE uuid = ?",
                 (str(target_uuid),),
             ).fetchall()
             log.debug("GET treatments filter uuid=%s → %d rows", target_uuid, len(rows))
         elif min_ts:
             rows = conn.execute(
-                "SELECT id, uuid, eventType, insulin, carbs, notes, timestamp, is_voided FROM treatments WHERE timestamp >= ? ORDER BY timestamp DESC LIMIT ?",
+                "SELECT id, uuid, eventType, insulin, carbs, notes, timestamp, glucose, is_voided FROM treatments WHERE timestamp >= ? ORDER BY timestamp DESC LIMIT ?",
                 (min_ts, limit),
             ).fetchall()
         else:
             rows = conn.execute(
-                "SELECT id, uuid, eventType, insulin, carbs, notes, timestamp, is_voided FROM treatments ORDER BY timestamp DESC LIMIT ?",
+                "SELECT id, uuid, eventType, insulin, carbs, notes, timestamp, glucose, is_voided FROM treatments ORDER BY timestamp DESC LIMIT ?",
                 (limit,),
             ).fetchall()
     finally:
@@ -429,7 +435,7 @@ def get_treatments(request: Request, limit: int = 50):
         item_uuid = r["uuid"] if r["uuid"] else str(r["id"])
         is_void = bool(r["is_voided"] or r["eventType"] == "Void")
         iso_time = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(r["timestamp"]))
-        result.append({
+        item = {
             "_id": item_uuid,
             "uuid": item_uuid,
             "sysid": item_uuid,
@@ -443,7 +449,12 @@ def get_treatments(request: Request, limit: int = 50):
             "createdAt": iso_time,
             "mills": ts_ms,
             "timestamp": ts_ms,
-        })
+        }
+        if r["glucose"] is not None and not is_void:
+            item["glucose"] = r["glucose"]
+            item["units"] = "mg/dl"
+            item["glucoseType"] = "Finger"
+        result.append(item)
     return result
 
 
@@ -507,8 +518,8 @@ async def post_treatments(request: Request):
                         glucose_mgdl = t.glucose
 
                 conn.execute(
-                    "INSERT INTO treatments (uuid, eventType, insulin, carbs, notes, timestamp, is_voided) VALUES (?, ?, ?, ?, ?, ?, 0)",
-                    (item_uuid, t.eventType, t.insulin, t.carbs, t.notes, ts),
+                    "INSERT INTO treatments (uuid, eventType, insulin, carbs, notes, timestamp, glucose, is_voided) VALUES (?, ?, ?, ?, ?, ?, ?, 0)",
+                    (item_uuid, t.eventType, t.insulin, t.carbs, t.notes, ts, glucose_mgdl),
                 )
                 inserted += 1
                 log.info(
