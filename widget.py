@@ -101,7 +101,7 @@ logger.info("=================== xDrip Widget Initializing ===================")
 # Constants
 # ---------------------------------------------------------------------------
 APP_NAME     = "xDrip Widget"
-APP_VERSION  = "1.3.1"
+APP_VERSION  = "1.3.3"
 ORG_NAME     = "xdripwidget"
 INSTANCE_KEY = "xDripWidgetSingleInstance"
 DEFAULT_URL  = "http://localhost:8080"
