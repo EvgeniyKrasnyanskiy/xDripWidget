@@ -171,11 +171,24 @@ def get_settings() -> QSettings:
     if not os.path.exists(CONFIG_FILE):
         try:
             with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-                f.write("[General]\nserver_url = http://localhost:8080\napi_secret = \nopacity = 90\n\n[Logging]\nlog_level = INFO\n")
+                f.write("[General]\nserver_url = http://localhost:8080\napi_secret = \ntransparency = 10\nopacity = 90\n\n[Logging]\nlog_level = INFO\n")
             logger.info("Created default config.ini file")
         except Exception as e:
             logger.error(f"Error creating config.ini: {e}")
     return QSettings(CONFIG_FILE, QSettings.Format.IniFormat)
+
+
+def get_window_opacity(s: QSettings) -> float:
+    """Calculate window opacity float (0.3..1.0) from settings transparency (0..70%)."""
+    if s.contains("transparency"):
+        t = int(s.value("transparency", 10))
+    elif s.contains("opacity"):
+        op = int(s.value("opacity", 90))
+        t = 100 - op
+    else:
+        t = 10
+    t = max(0, min(70, t))
+    return (100 - t) / 100.0
 
 
 def glucose_color(mmol: float, stale: bool) -> QColor:
@@ -643,13 +656,20 @@ class SettingsDialog(QDialog):
         if log_level_val in LOG_LEVELS:
             self._log_level_combo.setCurrentText(log_level_val)
 
-        opacity_val = int(s.value("opacity", 90))
+        if s.contains("transparency"):
+            transparency_val = int(s.value("transparency", 10))
+        elif s.contains("opacity"):
+            transparency_val = 100 - int(s.value("opacity", 90))
+        else:
+            transparency_val = 10
+        transparency_val = max(0, min(70, transparency_val))
+
         self._opacity_slider = QSlider(Qt.Orientation.Horizontal)
-        self._opacity_slider.setRange(30, 100)
-        self._opacity_slider.setValue(opacity_val)
+        self._opacity_slider.setRange(0, 70)
+        self._opacity_slider.setValue(transparency_val)
         self._opacity_slider.setTickInterval(10)
         self._opacity_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
-        self._opacity_label = QLabel(f"{opacity_val}%")
+        self._opacity_label = QLabel(f"{transparency_val}%")
         self._opacity_label.setMinimumWidth(36)
         self._opacity_slider.valueChanged.connect(self._on_opacity_change)
 
@@ -676,18 +696,20 @@ class SettingsDialog(QDialog):
     def _on_opacity_change(self, value: int):
         self._opacity_label.setText(f"{value}%")
         if self.parent():
-            self.parent().setWindowOpacity(value / 100.0)
+            self.parent().setWindowOpacity((100 - value) / 100.0)
 
     def _save(self):
         s = get_settings()
         s.setValue("server_url", self._url_edit.text().strip())
         s.setValue("api_secret",  self._secret_edit.text().strip())
-        s.setValue("opacity",     self._opacity_slider.value())
+        val = self._opacity_slider.value()
+        s.setValue("transparency", val)
+        s.setValue("opacity",      100 - val)
         lvl = self._log_level_combo.currentText()
         s.setValue("Logging/log_level", lvl)
         s.sync()
         apply_log_level(lvl)
-        logger.info(f"Settings saved in SettingsDialog (log_level={lvl})")
+        logger.info(f"Settings saved in SettingsDialog (transparency={val}%, log_level={lvl})")
         self.accept()
 
 
@@ -770,7 +792,7 @@ class GlucoseWidget(QWidget):
 
         s = get_settings()
         self.move(s.value("position", QPoint(100, 100)))
-        self.setWindowOpacity(int(s.value("opacity", 90)) / 100.0)
+        self.setWindowOpacity(get_window_opacity(s))
         apply_log_level(str(s.value("Logging/log_level", s.value("log_level", "INFO"))))
 
         self._font_big = QFont("Segoe UI", 28, QFont.Weight.Bold)
@@ -842,7 +864,7 @@ class GlucoseWidget(QWidget):
                 self._config_mtime = mtime
                 logger.info("Detected config.ini modification, reloading settings...")
                 s = get_settings()
-                self.setWindowOpacity(int(s.value("opacity", 90)) / 100.0)
+                self.setWindowOpacity(get_window_opacity(s))
                 apply_log_level(str(s.value("Logging/log_level", s.value("log_level", "INFO"))))
         except Exception as e:
             logger.error(f"Hot reload check error: {e}")
@@ -1107,7 +1129,7 @@ class GlucoseWidget(QWidget):
         if not self._history or len(self._history) < 2:
             return
 
-        GX, GY, GW, GH = 10, 85, 200, 48
+        GX, GY, GW, GH = 10, 78, 200, 42
 
         min_val = 2.5
         max_val = 14.0
@@ -1154,6 +1176,36 @@ class GlucoseWidget(QWidget):
             painter.setPen(QPen(dot_color.darker(120), 1))
             painter.setBrush(QBrush(dot_color))
             painter.drawEllipse(QPoint(px, py), 3, 3)
+
+        # ── 4-Hour Time Axis / Timeline ───────────────────────────────
+        axis_y = GY + GH + 4
+        painter.setPen(QPen(QColor(255, 255, 255, 35), 1))
+        painter.drawLine(GX, axis_y, GX + GW, axis_y)
+
+        # Tick marks
+        mid_x = GX + GW // 2
+        painter.drawLine(GX, axis_y, GX, axis_y + 3)
+        painter.drawLine(mid_x, axis_y, mid_x, axis_y + 3)
+        painter.drawLine(GX + GW, axis_y, GX + GW, axis_y + 3)
+
+        # Time labels
+        painter.setPen(QColor(180, 180, 180, 150))
+        painter.setFont(self._font_sml)
+        painter.drawText(
+            GX, axis_y + 2, 50, 16,
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            "-4ч",
+        )
+        painter.drawText(
+            mid_x - 25, axis_y + 2, 50, 16,
+            Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter,
+            "-2ч",
+        )
+        painter.drawText(
+            GX + GW - 50, axis_y + 2, 50, 16,
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+            "сейчас",
+        )
 
     # ------------------------------------------------------------------
     # Drag & Mouse
@@ -1232,7 +1284,7 @@ class GlucoseWidget(QWidget):
         dlg = SettingsDialog(self)
         dlg.exec()
         s = get_settings()
-        self.setWindowOpacity(int(s.value("opacity", 90)) / 100.0)
+        self.setWindowOpacity(get_window_opacity(s))
         if dlg.result() == QDialog.DialogCode.Accepted:
             self._fetch()
 
