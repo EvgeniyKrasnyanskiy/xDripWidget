@@ -88,7 +88,8 @@ def init_db() -> None:
                 insulin   REAL    NOT NULL DEFAULT 0.0,
                 carbs     REAL    NOT NULL DEFAULT 0.0,
                 notes     TEXT    NOT NULL DEFAULT '',
-                timestamp INTEGER NOT NULL
+                timestamp INTEGER NOT NULL,
+                is_voided INTEGER NOT NULL DEFAULT 0
             )
             """
         )
@@ -104,6 +105,11 @@ def init_db() -> None:
         try:
             conn.execute("ALTER TABLE treatments ADD COLUMN uuid TEXT NOT NULL DEFAULT ''")
             log.info("Migration: added uuid column to treatments")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            conn.execute("ALTER TABLE treatments ADD COLUMN is_voided INTEGER NOT NULL DEFAULT 0")
+            log.info("Migration: added is_voided column to treatments")
         except sqlite3.OperationalError:
             pass
         # Assign UUIDs to any existing treatments that lack one
@@ -399,22 +405,19 @@ def get_treatments(request: Request, limit: int = 50):
     conn = get_db()
     try:
         if target_uuid:
-            # Filter by uuid ONLY — do NOT fallback to integer id.
-            # xDrip+ sends find[uuid]=1 as a probe; matching id=1 would cause
-            # deleted treatments to reappear.
             rows = conn.execute(
-                "SELECT id, uuid, eventType, insulin, carbs, notes, timestamp FROM treatments WHERE uuid = ?",
+                "SELECT id, uuid, eventType, insulin, carbs, notes, timestamp, is_voided FROM treatments WHERE uuid = ?",
                 (str(target_uuid),),
             ).fetchall()
             log.debug("GET treatments filter uuid=%s → %d rows", target_uuid, len(rows))
         elif min_ts:
             rows = conn.execute(
-                "SELECT id, uuid, eventType, insulin, carbs, notes, timestamp FROM treatments WHERE timestamp >= ? ORDER BY timestamp DESC LIMIT ?",
+                "SELECT id, uuid, eventType, insulin, carbs, notes, timestamp, is_voided FROM treatments WHERE timestamp >= ? ORDER BY timestamp DESC LIMIT ?",
                 (min_ts, limit),
             ).fetchall()
         else:
             rows = conn.execute(
-                "SELECT id, uuid, eventType, insulin, carbs, notes, timestamp FROM treatments ORDER BY timestamp DESC LIMIT ?",
+                "SELECT id, uuid, eventType, insulin, carbs, notes, timestamp, is_voided FROM treatments ORDER BY timestamp DESC LIMIT ?",
                 (limit,),
             ).fetchall()
     finally:
@@ -424,18 +427,37 @@ def get_treatments(request: Request, limit: int = 50):
     for r in rows:
         ts_ms = r["timestamp"] * 1000
         item_uuid = r["uuid"] if r["uuid"] else str(r["id"])
+        is_void = bool(r["is_voided"] or r["eventType"] == "Void")
+        iso_time = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(r["timestamp"]))
         result.append({
             "_id": item_uuid,
             "uuid": item_uuid,
             "sysid": item_uuid,
-            "eventType": r["eventType"],
-            "insulin": r["insulin"],
-            "carbs": r["carbs"],
-            "notes": r["notes"],
-            "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(r["timestamp"])),
+            "eventType": "Void" if is_void else r["eventType"],
+            "isVoided": is_void,
+            "insulin": 0.0 if is_void else r["insulin"],
+            "carbs": 0.0 if is_void else r["carbs"],
+            "notes": "Voided" if is_void else r["notes"],
+            "created_at": iso_time,
+            "createdAt": iso_time,
             "mills": ts_ms,
+            "timestamp": ts_ms,
         })
     return result
+
+
+def _mark_voided(conn: sqlite3.Connection, tid: str) -> int:
+    cur = conn.execute(
+        "UPDATE treatments SET is_voided = 1, eventType = 'Void', carbs = 0.0, insulin = 0.0, notes = 'Voided' WHERE uuid = ? OR id = ?",
+        (tid, tid),
+    )
+    if cur.rowcount == 0:
+        conn.execute(
+            "INSERT INTO treatments (uuid, eventType, insulin, carbs, notes, timestamp, is_voided) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (tid, "Void", 0.0, 0.0, "Voided", int(time.time()), 1),
+        )
+        return 1
+    return cur.rowcount
 
 
 @app.post(
@@ -484,7 +506,7 @@ async def post_treatments(request: Request):
                         glucose_mgdl = t.glucose
 
                 conn.execute(
-                    "INSERT INTO treatments (uuid, eventType, insulin, carbs, notes, timestamp) VALUES (?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO treatments (uuid, eventType, insulin, carbs, notes, timestamp, is_voided) VALUES (?, ?, ?, ?, ?, ?, 0)",
                     (item_uuid, t.eventType, t.insulin, t.carbs, t.notes, ts),
                 )
                 inserted += 1
@@ -526,9 +548,8 @@ def delete_treatment_by_path(treatment_id: str):
     deleted = 0
     try:
         with conn:
-            cur = conn.execute("DELETE FROM treatments WHERE uuid = ?", (tid,))
-            deleted = cur.rowcount
-            log.info("Treatment deleted via path: uuid=%s (rows=%d)", tid, deleted)
+            deleted = _mark_voided(conn, tid)
+            log.info("Treatment voided via DELETE path: uuid=%s (rows=%d)", tid, deleted)
     finally:
         conn.close()
     return {"deleted": deleted}
@@ -556,9 +577,8 @@ def delete_treatment_by_query(request: Request):
     try:
         with conn:
             if tid:
-                cur = conn.execute("DELETE FROM treatments WHERE uuid = ?", (str(tid),))
-                deleted = cur.rowcount
-                log.info("Treatment deleted via query: uuid=%s (rows=%d)", tid, deleted)
+                deleted = _mark_voided(conn, str(tid))
+                log.info("Treatment voided via DELETE query: uuid=%s (rows=%d)", tid, deleted)
             else:
                 log.warning("DELETE /treatments called without id/uuid in params: %s", params)
     finally:
@@ -616,9 +636,8 @@ async def put_treatments(request: Request, treatment_id: Optional[str] = None):
                     event_type = str(raw.get("eventType", "Meal Bolus") or "Meal Bolus")
 
                     if raw.get("isVoided") or raw.get("eventType") == "Void" or raw.get("notes") == "Voided":
-                        cur = conn.execute("DELETE FROM treatments WHERE uuid = ?", (tid,))
-                        updated += cur.rowcount
-                        log.info("Treatment voided/deleted via PUT: uuid=%s", tid)
+                        updated += _mark_voided(conn, tid)
+                        log.info("Treatment voided via PUT: uuid=%s", tid)
                     else:
                         cur = conn.execute(
                             "UPDATE treatments SET eventType = ?, insulin = ?, carbs = ?, notes = ? WHERE uuid = ?",

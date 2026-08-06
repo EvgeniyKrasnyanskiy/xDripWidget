@@ -107,7 +107,7 @@ logger.info("=================== xDrip Widget Initializing ===================")
 # Constants
 # ---------------------------------------------------------------------------
 APP_NAME     = "xDrip Widget"
-APP_VERSION  = "1.4.0"
+APP_VERSION  = "1.4.1"
 ORG_NAME     = "xdripwidget"
 INSTANCE_KEY = "xDripWidgetSingleInstance"
 DEFAULT_URL  = "http://localhost:8080"
@@ -476,7 +476,10 @@ class TreatmentHistoryDialog(QDialog):
 
     def _populate_table(self, items: list):
         self._table.setRowCount(0)
-        for row_idx, item in enumerate(items):
+        row_idx = 0
+        for item in items:
+            if item.get("isVoided") or item.get("eventType") == "Void":
+                continue
             self._table.insertRow(row_idx)
 
             ts_ms = item.get("mills") or item.get("date") or 0
@@ -504,6 +507,7 @@ class TreatmentHistoryDialog(QDialog):
             btn_del.setStyleSheet("background-color: #e74c3c; color: white; border-radius: 3px; font-weight: bold;")
             btn_del.clicked.connect(lambda _, uid=item_uuid, c=carbs, i=insulin: self._delete_item(uid, c, i))
             self._table.setCellWidget(row_idx, 4, btn_del)
+            row_idx += 1
 
     def _delete_item(self, item_uuid: str, carbs: float, insulin: float):
         if not item_uuid:
