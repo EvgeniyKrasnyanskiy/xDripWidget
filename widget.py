@@ -84,7 +84,21 @@ from PyQt6.QtWidgets import (
 # ---------------------------------------------------------------------------
 LOG_FILE = "widget.log"
 logger = logging.getLogger("xDripWidget")
-logger.setLevel(logging.DEBUG)
+
+LOG_LEVELS: dict[str, int] = {
+    "DEBUG": logging.DEBUG,
+    "INFO": logging.INFO,
+    "WARNING": logging.WARNING,
+    "ERROR": logging.ERROR,
+}
+
+
+def apply_log_level(level_name: str) -> None:
+    lvl = LOG_LEVELS.get(str(level_name).upper(), logging.INFO)
+    logger.setLevel(lvl)
+    for h in logger.handlers:
+        h.setLevel(lvl)
+
 
 if not logger.handlers:
     try:
@@ -101,13 +115,14 @@ if not logger.handlers:
     except Exception as exc:
         print(f"Failed to initialize log file handler: {exc}")
 
+apply_log_level("INFO")
 logger.info("=================== xDrip Widget Initializing ===================")
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 APP_NAME     = "xDrip Widget"
-APP_VERSION  = "1.4.4"
+APP_VERSION  = "1.5.0"
 ORG_NAME     = "xdripwidget"
 INSTANCE_KEY = "xDripWidgetSingleInstance"
 DEFAULT_URL  = "http://localhost:8080"
@@ -156,7 +171,7 @@ def get_settings() -> QSettings:
     if not os.path.exists(CONFIG_FILE):
         try:
             with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-                f.write("[General]\nserver_url = http://localhost:8080\napi_secret = \nopacity = 90\n")
+                f.write("[General]\nserver_url = http://localhost:8080\napi_secret = \nopacity = 90\n\n[Logging]\nlog_level = INFO\n")
             logger.info("Created default config.ini file")
         except Exception as e:
             logger.error(f"Error creating config.ini: {e}")
@@ -607,12 +622,18 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Настройки виджета")
         self.setModal(True)
-        self.resize(360, 185)
+        self.resize(370, 220)
 
         s = get_settings()
         self._url_edit    = QLineEdit(str(s.value("server_url", DEFAULT_URL)))
         self._secret_edit = QLineEdit(str(s.value("api_secret", "")))
         self._secret_edit.setEchoMode(QLineEdit.EchoMode.Password)
+
+        log_level_val = str(s.value("Logging/log_level", s.value("log_level", "INFO"))).upper()
+        self._log_level_combo = QComboBox()
+        self._log_level_combo.addItems(list(LOG_LEVELS.keys()))
+        if log_level_val in LOG_LEVELS:
+            self._log_level_combo.setCurrentText(log_level_val)
 
         opacity_val = int(s.value("opacity", 90))
         self._opacity_slider = QSlider(Qt.Orientation.Horizontal)
@@ -632,6 +653,7 @@ class SettingsDialog(QDialog):
         form.addRow("URL сервера:", self._url_edit)
         form.addRow("API Secret:",  self._secret_edit)
         form.addRow("Прозрачность:", opacity_row)
+        form.addRow("Уровень логов:", self._log_level_combo)
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
@@ -653,8 +675,11 @@ class SettingsDialog(QDialog):
         s.setValue("server_url", self._url_edit.text().strip())
         s.setValue("api_secret",  self._secret_edit.text().strip())
         s.setValue("opacity",     self._opacity_slider.value())
+        lvl = self._log_level_combo.currentText()
+        s.setValue("Logging/log_level", lvl)
         s.sync()
-        logger.info("Settings saved in SettingsDialog")
+        apply_log_level(lvl)
+        logger.info(f"Settings saved in SettingsDialog (log_level={lvl})")
         self.accept()
 
 
@@ -738,6 +763,7 @@ class GlucoseWidget(QWidget):
         s = get_settings()
         self.move(s.value("position", QPoint(100, 100)))
         self.setWindowOpacity(int(s.value("opacity", 90)) / 100.0)
+        apply_log_level(str(s.value("Logging/log_level", s.value("log_level", "INFO"))))
 
         self._font_big = QFont("Segoe UI", 28, QFont.Weight.Bold)
         self._font_med = QFont("Segoe UI", 12, QFont.Weight.Normal)
@@ -809,6 +835,7 @@ class GlucoseWidget(QWidget):
                 logger.info("Detected config.ini modification, reloading settings...")
                 s = get_settings()
                 self.setWindowOpacity(int(s.value("opacity", 90)) / 100.0)
+                apply_log_level(str(s.value("Logging/log_level", s.value("log_level", "INFO"))))
         except Exception as e:
             logger.error(f"Hot reload check error: {e}")
 
