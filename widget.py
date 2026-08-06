@@ -28,6 +28,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+import uuid
 from datetime import datetime
 from typing import Optional
 
@@ -382,13 +383,16 @@ class TreatmentDialog(QDialog):
 
         qdt = self._datetime_edit.dateTime()
         ts = qdt.toSecsSinceEpoch()
+        item_uuid = str(uuid.uuid4())
 
         payload: dict = {
+            "uuid": item_uuid,
+            "_id": item_uuid,
             "eventType": event_type,
             "carbs": carbs,
             "insulin": insulin,
             "notes": self._notes_edit.text().strip(),
-            "created_at": ts,
+            "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(ts)),
             "date": ts * 1000,
         }
         if glucose > 0:

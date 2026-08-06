@@ -18,6 +18,7 @@ import logging
 import os
 import sqlite3
 import time
+import uuid
 from contextlib import asynccontextmanager
 from typing import Any, List, Optional, Union
 
@@ -82,6 +83,7 @@ def init_db() -> None:
             """
             CREATE TABLE IF NOT EXISTS treatments (
                 id        INTEGER PRIMARY KEY AUTOINCREMENT,
+                uuid      TEXT    NOT NULL DEFAULT '',
                 eventType TEXT    NOT NULL DEFAULT 'Meal Bolus',
                 insulin   REAL    NOT NULL DEFAULT 0.0,
                 carbs     REAL    NOT NULL DEFAULT 0.0,
@@ -93,12 +95,18 @@ def init_db() -> None:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_entries_ts    ON entries(timestamp DESC)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_devstatus_ts  ON devicestatus(timestamp DESC)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_treatments_ts ON treatments(timestamp DESC)")
-        # --- migration: add battery column if upgrading from older schema ---
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_treatments_uuid ON treatments(uuid)")
+        # --- migrations ---
         try:
             conn.execute("ALTER TABLE devicestatus ADD COLUMN battery INTEGER NOT NULL DEFAULT -1")
             log.info("Migration: added battery column to devicestatus")
         except sqlite3.OperationalError:
-            pass  # column already exists
+            pass
+        try:
+            conn.execute("ALTER TABLE treatments ADD COLUMN uuid TEXT NOT NULL DEFAULT ''")
+            log.info("Migration: added uuid column to treatments")
+        except sqlite3.OperationalError:
+            pass
     conn.close()
     log.info("Database initialised at %s", DB_PATH)
 
@@ -202,6 +210,8 @@ class TreatmentIn(BaseModel):
     # Optional manual blood glucose value (mmol/L)
     glucose: Optional[float] = None
     units: Optional[str] = None  # "mmol" or "mgdl"
+    uuid: Optional[str] = None
+    _id: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -364,22 +374,44 @@ def nightscout_status():
 
 @app.get("/api/v1/treatments", tags=["nightscout"])
 @app.get("/api/v1/treatments.json", tags=["nightscout"], include_in_schema=False)
-def get_treatments(limit: int = 50):
+def get_treatments(request: Request, limit: int = 50):
     """Nightscout-compatible treatments endpoint (returns recent boluses & carbs for xDrip+)."""
+    params = dict(request.query_params)
+    target_uuid = params.get("find[uuid]") or params.get("find[_id]") or params.get("find[sysid]") or params.get("uuid") or params.get("_id")
+    min_ts = None
+    if params.get("find[createdAt][$gte]"):
+        val = params.get("find[createdAt][$gte]")
+        if val and val.isdigit():
+            min_ts = int(val) // 1000 if int(val) > 1e10 else int(val)
+
     conn = get_db()
     try:
-        rows = conn.execute(
-            "SELECT id, eventType, insulin, carbs, notes, timestamp FROM treatments ORDER BY timestamp DESC LIMIT ?",
-            (limit,),
-        ).fetchall()
+        if target_uuid:
+            rows = conn.execute(
+                "SELECT id, uuid, eventType, insulin, carbs, notes, timestamp FROM treatments WHERE uuid = ? OR id = ?",
+                (str(target_uuid), str(target_uuid)),
+            ).fetchall()
+        elif min_ts:
+            rows = conn.execute(
+                "SELECT id, uuid, eventType, insulin, carbs, notes, timestamp FROM treatments WHERE timestamp >= ? ORDER BY timestamp DESC LIMIT ?",
+                (min_ts, limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT id, uuid, eventType, insulin, carbs, notes, timestamp FROM treatments ORDER BY timestamp DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
     finally:
         conn.close()
 
     result = []
     for r in rows:
         ts_ms = r["timestamp"] * 1000
+        item_uuid = r["uuid"] if r["uuid"] else str(r["id"])
         result.append({
-            "_id": str(r["id"]),
+            "_id": item_uuid,
+            "uuid": item_uuid,
+            "sysid": item_uuid,
             "eventType": r["eventType"],
             "insulin": r["insulin"],
             "carbs": r["carbs"],
@@ -425,26 +457,27 @@ async def post_treatments(request: Request):
                 if not ts:
                     ts = int(time.time())
 
+                item_uuid = str(raw.get("uuid") or raw.get("_id") or t.uuid or t._id or uuid.uuid4())
+
                 # Handle optional glucose value (convert mmol→mgdl if needed)
                 glucose_mgdl: Optional[float] = None
                 if t.glucose is not None and t.glucose > 0:
                     if t.units == "mmol":
                         glucose_mgdl = round(t.glucose * 18.0182, 1)
                     else:
-                        glucose_mgdl = t.glucose  # assume mgdl already
+                        glucose_mgdl = t.glucose
 
                 conn.execute(
-                    "INSERT INTO treatments (eventType, insulin, carbs, notes, timestamp) VALUES (?, ?, ?, ?, ?)",
-                    (t.eventType, t.insulin, t.carbs, t.notes, ts),
+                    "INSERT INTO treatments (uuid, eventType, insulin, carbs, notes, timestamp) VALUES (?, ?, ?, ?, ?, ?)",
+                    (item_uuid, t.eventType, t.insulin, t.carbs, t.notes, ts),
                 )
                 inserted += 1
                 log.info(
-                    "Treatment saved: %s Insulin=%.1f Carbs=%.1f Glucose=%s @%s",
-                    t.eventType, t.insulin, t.carbs,
+                    "Treatment saved: uuid=%s %s Insulin=%.1f Carbs=%.1f Glucose=%s @%s",
+                    item_uuid, t.eventType, t.insulin, t.carbs,
                     f"{glucose_mgdl:.1f}mg/dL" if glucose_mgdl else "—", ts
                 )
 
-                # If glucose provided, also store it as a BG entry so xDrip+ receives it
                 if glucose_mgdl is not None:
                     conn.execute(
                         "INSERT INTO entries (sgv, direction, timestamp) VALUES (?, ?, ?)",
@@ -471,15 +504,15 @@ async def post_treatments(request: Request):
     include_in_schema=False,
 )
 def delete_treatment_by_path(treatment_id: str):
-    """Delete treatment by ID (Nightscout REST API)."""
+    """Delete treatment by ID or UUID (Nightscout REST API)."""
     tid = treatment_id.replace(".json", "")
     conn = get_db()
     deleted = 0
     try:
         with conn:
-            cur = conn.execute("DELETE FROM treatments WHERE id = ?", (tid,))
+            cur = conn.execute("DELETE FROM treatments WHERE uuid = ? OR id = ?", (tid, tid))
             deleted = cur.rowcount
-            log.info("Treatment deleted via path: id=%s (rows=%d)", tid, deleted)
+            log.info("Treatment deleted via path: id/uuid=%s (rows=%d)", tid, deleted)
     finally:
         conn.close()
     return {"deleted": deleted}
@@ -499,19 +532,19 @@ def delete_treatment_by_path(treatment_id: str):
     include_in_schema=False,
 )
 def delete_treatment_by_query(request: Request):
-    """Delete treatment by query params (e.g. ?find[_id]=123 or ?id=123)."""
+    """Delete treatment by query params (e.g. ?find[uuid]=xxx or ?find[_id]=xxx or ?id=xxx)."""
     params = dict(request.query_params)
-    tid = params.get("id") or params.get("find[_id]") or params.get("_id")
+    tid = params.get("uuid") or params.get("_id") or params.get("id") or params.get("find[uuid]") or params.get("find[_id]") or params.get("find[sysid]")
     deleted = 0
     conn = get_db()
     try:
         with conn:
             if tid:
-                cur = conn.execute("DELETE FROM treatments WHERE id = ?", (tid,))
+                cur = conn.execute("DELETE FROM treatments WHERE uuid = ? OR id = ?", (str(tid), str(tid)))
                 deleted = cur.rowcount
-                log.info("Treatment deleted via query: id=%s (rows=%d)", tid, deleted)
+                log.info("Treatment deleted via query: id/uuid=%s (rows=%d)", tid, deleted)
             else:
-                log.warning("DELETE /treatments called without id in params: %s", params)
+                log.warning("DELETE /treatments called without id/uuid in params: %s", params)
     finally:
         conn.close()
     return {"deleted": deleted}
@@ -558,7 +591,7 @@ async def put_treatments(request: Request, treatment_id: Optional[str] = None):
     try:
         with conn:
             for raw in body:
-                tid = treatment_id or raw.get("_id") or raw.get("id")
+                tid = treatment_id or raw.get("uuid") or raw.get("_id") or raw.get("id")
                 if tid:
                     tid = str(tid).replace(".json", "")
                     insulin = float(raw.get("insulin", 0.0) or 0.0)
@@ -566,18 +599,17 @@ async def put_treatments(request: Request, treatment_id: Optional[str] = None):
                     notes = str(raw.get("notes", "") or "")
                     event_type = str(raw.get("eventType", "Meal Bolus") or "Meal Bolus")
 
-                    # Check if treatment is marked as voided or deleted
                     if raw.get("isVoided") or raw.get("eventType") == "Void" or raw.get("notes") == "Voided":
-                        cur = conn.execute("DELETE FROM treatments WHERE id = ?", (tid,))
+                        cur = conn.execute("DELETE FROM treatments WHERE uuid = ? OR id = ?", (tid, tid))
                         updated += cur.rowcount
-                        log.info("Treatment voided/deleted via PUT: id=%s", tid)
+                        log.info("Treatment voided/deleted via PUT: id/uuid=%s", tid)
                     else:
                         cur = conn.execute(
-                            "UPDATE treatments SET eventType = ?, insulin = ?, carbs = ?, notes = ? WHERE id = ?",
-                            (event_type, insulin, carbs, notes, tid),
+                            "UPDATE treatments SET eventType = ?, insulin = ?, carbs = ?, notes = ? WHERE uuid = ? OR id = ?",
+                            (event_type, insulin, carbs, notes, tid, tid),
                         )
                         updated += cur.rowcount
-                        log.info("Treatment updated via PUT: id=%s Insulin=%.1f Carbs=%.1f", tid, insulin, carbs)
+                        log.info("Treatment updated via PUT: id/uuid=%s Insulin=%.1f Carbs=%.1f", tid, insulin, carbs)
     finally:
         conn.close()
 
