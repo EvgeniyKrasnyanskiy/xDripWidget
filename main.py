@@ -265,6 +265,56 @@ def health():
     return {"status": "ok", "ts": int(time.time())}
 
 
+@app.get("/api/v1/entries.json", tags=["nightscout"], dependencies=[Depends(verify_api_key)])
+@app.get("/api/v1/entries", tags=["nightscout"], include_in_schema=False, dependencies=[Depends(verify_api_key)])
+def get_entries(request: Request, count: int = Query(default=100, le=1000)):
+    """Nightscout-compatible entries endpoint — returns recent SGV/MBG entries for followers/xDrip+."""
+    params = dict(request.query_params)
+    # Support ?find[type]=mbg or ?count=N
+    entry_type = params.get("find[type]")  # e.g. "mbg" or "sgv"
+    min_ts_ms = params.get("find[date][$gte]")
+    min_ts = None
+    if min_ts_ms and str(min_ts_ms).isdigit():
+        raw = int(min_ts_ms)
+        min_ts = raw // 1000 if raw > 1e10 else raw
+
+    conn = get_db()
+    try:
+        if min_ts:
+            rows = conn.execute(
+                "SELECT id, sgv, direction, timestamp FROM entries WHERE timestamp >= ? ORDER BY timestamp DESC LIMIT ?",
+                (min_ts, count),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT id, sgv, direction, timestamp FROM entries ORDER BY timestamp DESC LIMIT ?",
+                (count,),
+            ).fetchall()
+    finally:
+        conn.close()
+
+    result = []
+    for r in rows:
+        ts_ms = r["timestamp"] * 1000
+        iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(r["timestamp"]))
+        entry = {
+            "_id": str(r["id"]),
+            "type": "sgv",
+            "sgv": round(r["sgv"], 1),
+            "mbg": round(r["sgv"], 1),
+            "dateString": iso,
+            "date": ts_ms,
+            "mills": ts_ms,
+            "direction": r["direction"],
+            "glucose": round(r["sgv"], 1),
+        }
+        # filter by type if requested
+        if entry_type and entry_type.lower() not in ("sgv", "mbg"):
+            continue
+        result.append(entry)
+    return result
+
+
 @app.post(
     "/api/v1/entries.json",
     status_code=status.HTTP_200_OK,
