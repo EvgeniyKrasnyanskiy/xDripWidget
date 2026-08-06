@@ -78,8 +78,21 @@ def init_db() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS treatments (
+                id        INTEGER PRIMARY KEY AUTOINCREMENT,
+                eventType TEXT    NOT NULL DEFAULT 'Meal Bolus',
+                insulin   REAL    NOT NULL DEFAULT 0.0,
+                carbs     REAL    NOT NULL DEFAULT 0.0,
+                notes     TEXT    NOT NULL DEFAULT '',
+                timestamp INTEGER NOT NULL
+            )
+            """
+        )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_entries_ts    ON entries(timestamp DESC)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_devstatus_ts  ON devicestatus(timestamp DESC)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_treatments_ts ON treatments(timestamp DESC)")
         # --- migration: add battery column if upgrading from older schema ---
         try:
             conn.execute("ALTER TABLE devicestatus ADD COLUMN battery INTEGER NOT NULL DEFAULT -1")
@@ -94,6 +107,7 @@ def prune_old_records(conn: sqlite3.Connection) -> None:
     cutoff = int(time.time()) - PRUNE_HOURS * 3600
     conn.execute("DELETE FROM entries       WHERE timestamp < ?", (cutoff,))
     conn.execute("DELETE FROM devicestatus  WHERE timestamp < ?", (cutoff,))
+    conn.execute("DELETE FROM treatments   WHERE timestamp < ?", (cutoff,))
 
 
 # ---------------------------------------------------------------------------
@@ -176,6 +190,15 @@ class DeviceStatusIn(BaseModel):
     COB: Optional[float] = Field(default=None, alias="COB")
 
     model_config = {"populate_by_name": True}
+
+
+class TreatmentIn(BaseModel):
+    eventType: str = "Meal Bolus"
+    insulin: float = 0.0
+    carbs: float = 0.0
+    notes: str = ""
+    created_at: Optional[Union[str, int]] = None
+    date: Optional[int] = None
 
 
 # ---------------------------------------------------------------------------
@@ -338,9 +361,107 @@ def nightscout_status():
 
 @app.get("/api/v1/treatments", tags=["nightscout"])
 @app.get("/api/v1/treatments.json", tags=["nightscout"], include_in_schema=False)
-def get_treatments():
-    """Stub treatments endpoint — returns empty list so xDrip+ doesn't 404."""
-    return []
+def get_treatments(limit: int = 50):
+    """Nightscout-compatible treatments endpoint (returns recent boluses & carbs for xDrip+)."""
+    conn = get_db()
+    try:
+        rows = conn.execute(
+            "SELECT id, eventType, insulin, carbs, notes, timestamp FROM treatments ORDER BY timestamp DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    result = []
+    for r in rows:
+        ts_ms = r["timestamp"] * 1000
+        result.append({
+            "_id": str(r["id"]),
+            "eventType": r["eventType"],
+            "insulin": r["insulin"],
+            "carbs": r["carbs"],
+            "notes": r["notes"],
+            "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(r["timestamp"])),
+            "mills": ts_ms,
+        })
+    return result
+
+
+@app.post(
+    "/api/v1/treatments.json",
+    status_code=status.HTTP_200_OK,
+    tags=["nightscout"],
+    dependencies=[Depends(verify_api_key)],
+)
+@app.post(
+    "/api/v1/treatments",
+    status_code=status.HTTP_200_OK,
+    tags=["nightscout"],
+    dependencies=[Depends(verify_api_key)],
+    include_in_schema=False,
+)
+async def post_treatments(request: Request):
+    """
+    Nightscout-compatible endpoint to record treatments (carbs / insulin).
+    Accepts JSON object or array.
+    """
+    body = await request.json()
+    if isinstance(body, dict):
+        body = [body]
+
+    conn = get_db()
+    inserted = 0
+    try:
+        with conn:
+            prune_old_records(conn)
+            for raw in body:
+                t = TreatmentIn.model_validate(raw)
+                ts = t.date
+                if ts and ts > 1e10:
+                    ts = int(ts / 1000)
+                if not ts:
+                    ts = int(time.time())
+
+                conn.execute(
+                    "INSERT INTO treatments (eventType, insulin, carbs, notes, timestamp) VALUES (?, ?, ?, ?, ?)",
+                    (t.eventType, t.insulin, t.carbs, t.notes, ts),
+                )
+                inserted += 1
+                log.info("Treatment saved: %s Insulin=%.1f Carbs=%.1f @%s", t.eventType, t.insulin, t.carbs, ts)
+    finally:
+        conn.close()
+
+    return {"saved": inserted}
+
+
+@app.get("/api/v1/history", tags=["widget"])
+def get_history(
+    hours: float = Query(default=4.0, ge=0.5, le=24.0),
+    api_secret: Optional[str] = Header(default=None, alias="api-secret"),
+    token: Optional[str] = Query(default=None, alias="token"),
+):
+    """Returns glucose history for the last N hours for the desktop widget sparkline."""
+    if api_secret or token:
+        verify_api_key(api_secret=api_secret, token=token)
+
+    cutoff = int(time.time()) - int(hours * 3600)
+    conn = get_db()
+    try:
+        rows = conn.execute(
+            "SELECT sgv, direction, timestamp FROM entries WHERE timestamp >= ? ORDER BY timestamp ASC",
+            (cutoff,),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    return [
+        {
+            "mmol": _to_mmol(r["sgv"]),
+            "timestamp": r["timestamp"],
+            "direction": r["direction"],
+        }
+        for r in rows
+    ]
 
 
 @app.get("/api/v1/current", tags=["widget"])
