@@ -122,7 +122,7 @@ logger.info("=================== xDrip Widget Initializing ===================")
 # Constants
 # ---------------------------------------------------------------------------
 APP_NAME     = "xDrip Widget"
-APP_VERSION  = "1.5.2"
+APP_VERSION  = "1.5.4"
 ORG_NAME     = "xdripwidget"
 INSTANCE_KEY = "xDripWidgetSingleInstance"
 DEFAULT_URL  = "http://localhost:8080"
@@ -162,7 +162,7 @@ COLOR_GREEN  = QColor("#27ae60")
 COLOR_YELLOW = QColor("#f39c12")
 COLOR_RED    = QColor("#e74c3c")
 COLOR_GRAY   = QColor("#7f8c8d")
-COLOR_BG     = QColor(20, 20, 30, 210)
+COLOR_BG     = QColor(20, 20, 30)
 COLOR_SUB    = QColor("#bdc3c7")
 
 
