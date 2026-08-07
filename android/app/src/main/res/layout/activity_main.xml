@@ -55,6 +55,36 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
+                android:text="Интервал автообновления:"
+                android:textSize="14sp" />
+
+            <TextView
+                android:id="@+id/tv_interval_val"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="5 мин"
+                android:textStyle="bold"
+                android:textSize="14sp" />
+        </LinearLayout>
+
+        <SeekBar
+            android:id="@+id/sb_interval"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:max="60"
+            android:progress="5"
+            android:layout_marginBottom="24dp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginBottom="8dp">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
                 android:text="Прозрачность фона:"
                 android:textSize="14sp" />
 
@@ -73,13 +103,21 @@
             android:layout_height="wrap_content"
             android:max="70"
             android:progress="15"
-            android:layout_marginBottom="32dp" />
+            android:layout_marginBottom="24dp" />
 
         <Button
             android:id="@+id/btn_save"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Сохранить и обновить виджет" />
+            android:text="Сохранить и обновить виджет"
+            android:layout_marginBottom="12dp" />
+
+        <Button
+            android:id="@+id/btn_about"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            style="?attr/materialButtonOutlinedStyle"
+            android:text="О программе" />
 
     </LinearLayout>
 </ScrollView>

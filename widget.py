@@ -71,6 +71,7 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QSlider,
+    QSpinBox,
     QSystemTrayIcon,
     QTableWidget,
     QTableWidgetItem,
@@ -122,7 +123,7 @@ logger.info("=================== xDrip Widget Initializing ===================")
 # Constants
 # ---------------------------------------------------------------------------
 APP_NAME     = "xDrip Widget"
-APP_VERSION  = "1.5.4"
+APP_VERSION  = "1.6.0"
 ORG_NAME     = "xdripwidget"
 INSTANCE_KEY = "xDripWidgetSingleInstance"
 DEFAULT_URL  = "http://localhost:8080"
@@ -133,8 +134,8 @@ ALERT_COOLDOWN_S = 3_600    # 1 h between same-type alerts
 # Thresholds (mmol/L)
 HYPO_SEVERE  = 3.3
 HYPO_MILD    = 3.9
-HYPER_MILD   = 9.0
-HYPER_SEVERE = 11.0
+HYPER_MILD   = 7.8
+HYPER_SEVERE = 10.0
 STALE_MINUTES = 15
 
 # Alert thresholds
@@ -158,12 +159,13 @@ TREND_ARROWS: dict[str, str] = {
 # ---------------------------------------------------------------------------
 # Colors
 # ---------------------------------------------------------------------------
-COLOR_GREEN  = QColor("#27ae60")
-COLOR_YELLOW = QColor("#f39c12")
-COLOR_RED    = QColor("#e74c3c")
-COLOR_GRAY   = QColor("#7f8c8d")
-COLOR_BG     = QColor(20, 20, 30)
-COLOR_SUB    = QColor("#bdc3c7")
+COLOR_GREEN    = QColor("#27ae60")
+COLOR_YELLOW   = QColor("#f39c12")
+COLOR_RED      = QColor("#e74c3c")
+COLOR_SOFT_RED = QColor("#e57373")
+COLOR_GRAY     = QColor("#7f8c8d")
+COLOR_BG       = QColor(20, 20, 30)
+COLOR_SUB      = QColor("#bdc3c7")
 
 
 def get_settings() -> QSettings:
@@ -194,11 +196,26 @@ def get_window_opacity(s: QSettings) -> float:
 def glucose_color(mmol: float, stale: bool) -> QColor:
     if stale:
         return COLOR_GRAY
-    if mmol < HYPO_SEVERE or mmol > HYPER_SEVERE:
+    if mmol <= HYPO_SEVERE:
         return COLOR_RED
-    if mmol < HYPO_MILD or mmol > HYPER_MILD:
+    if mmol < HYPO_MILD:
         return COLOR_YELLOW
-    return COLOR_GREEN
+    if mmol <= HYPER_MILD:
+        return COLOR_GREEN
+    if mmol < HYPER_SEVERE:
+        return COLOR_YELLOW
+    return COLOR_SOFT_RED
+
+
+def format_time_ago(minutes_ago: int) -> str:
+    if minutes_ago < 60:
+        return f"{minutes_ago} м назад"
+    elif minutes_ago < 1440:
+        hours = minutes_ago // 60
+        return f"{hours} ч назад"
+    else:
+        days = minutes_ago // 1440
+        return f"{days} д назад"
 
 
 def battery_color(pct: int) -> QColor:
@@ -677,10 +694,18 @@ class SettingsDialog(QDialog):
         opacity_row.addWidget(self._opacity_slider)
         opacity_row.addWidget(self._opacity_label)
 
+        interval_val = int(s.value("refresh_interval", 1))
+        interval_val = max(1, min(60, interval_val))
+        self._interval_spin = QSpinBox()
+        self._interval_spin.setRange(1, 60)
+        self._interval_spin.setValue(interval_val)
+        self._interval_spin.setSuffix(" мин")
+
         form = QFormLayout()
         form.addRow("URL сервера:", self._url_edit)
         form.addRow("API Secret:",  self._secret_edit)
         form.addRow("Прозрачность:", opacity_row)
+        form.addRow("Автообновление:", self._interval_spin)
         form.addRow("Уровень логов:", self._log_level_combo)
 
         buttons = QDialogButtonBox(
@@ -705,11 +730,12 @@ class SettingsDialog(QDialog):
         val = self._opacity_slider.value()
         s.setValue("transparency", val)
         s.setValue("opacity",      100 - val)
+        s.setValue("refresh_interval", self._interval_spin.value())
         lvl = self._log_level_combo.currentText()
         s.setValue("Logging/log_level", lvl)
         s.sync()
         apply_log_level(lvl)
-        logger.info(f"Settings saved in SettingsDialog (transparency={val}%, log_level={lvl})")
+        logger.info(f"Settings saved in SettingsDialog (transparency={val}%, refresh_interval={self._interval_spin.value()}m, log_level={lvl})")
         self.accept()
 
 
@@ -721,18 +747,24 @@ class AboutDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("О программе")
         self.setModal(True)
-        self.resize(370, 270)
+        self.resize(400, 340)
 
         text = QTextBrowser()
         text.setOpenExternalLinks(True)
         text.setHtml(f"""
             <h2 style="margin:0 0 4px 0">{APP_NAME} &nbsp; v{APP_VERSION}</h2>
             <p style="margin:0 0 8px 0; color:#888">
-                Ультра-лёгкий десктопный виджет мониторинга глюкозы крови.
+                Ультра-лёгкий десктопный и мобильный виджет мониторинга глюкозы крови.
             </p>
-            <p><b>Совместим с:</b> xDrip+, AAPS (AndroidAPS)<br>
+            <p><b>Совместимость:</b> xDrip+, AAPS (AndroidAPS)<br>
                <b>Протокол:</b> Nightscout REST API<br>
                <b>Файл настроек:</b> config.ini (hot-reload)</p>
+            <p><b>🎨 Цветовая схема порогов глюкозы:</b><br>
+               🔴 <b>&le; 3.3 ммоль/л:</b> Тяжелая гипогликемия (Ярко-красный)<br>
+               🟡 <b>3.4 – 3.8 ммоль/л:</b> Легкая гипогликемия (Жёлтый)<br>
+               🟢 <b>3.9 – 7.8 ммоль/л:</b> Целевая норма (Зелёный)<br>
+               🟡 <b>7.9 – 9.9 ммоль/л:</b> Легкая гипергликемия (Жёлтый)<br>
+               🔴 <b>&ge; 10.0 ммоль/л:</b> Гипергликемия (Мягкий красный)</p>
             <p><b>Пороги оповещений:</b><br>
                🔴 Гипо:&nbsp;&nbsp;&nbsp;&nbsp; &lt; {ALERT_HYPO} ммоль/л<br>
                🟡 Гипер:&nbsp;&nbsp;&nbsp; &gt; {ALERT_HYPER} ммоль/л<br>
@@ -849,7 +881,9 @@ class GlucoseWidget(QWidget):
         self._fetch()
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._on_poll_timer)
-        self._timer.start(POLL_INTERVAL_MS)
+        s = get_settings()
+        interval_min = max(1, min(60, int(s.value("refresh_interval", 1))))
+        self._timer.start(interval_min * 60_000)
 
     def _on_poll_timer(self):
         self._check_config_hot_reload()
@@ -866,6 +900,10 @@ class GlucoseWidget(QWidget):
                 s = get_settings()
                 self.setWindowOpacity(get_window_opacity(s))
                 apply_log_level(str(s.value("Logging/log_level", s.value("log_level", "INFO"))))
+                interval_min = max(1, min(60, int(s.value("refresh_interval", 1))))
+                if self._timer.interval() != interval_min * 60_000:
+                    self._timer.setInterval(interval_min * 60_000)
+                    logger.info(f"Updated timer interval to {interval_min} minutes")
         except Exception as e:
             logger.error(f"Hot reload check error: {e}")
 
@@ -1062,10 +1100,11 @@ class GlucoseWidget(QWidget):
         # ── Delta ─────────────────────────────────────────────────────
         painter.setPen(COLOR_SUB)
         painter.setFont(self._font_med)
+        icon_symbol = "🔄" if minutes_ago > 1 else "Δ"
         painter.drawText(
             8, 4, 80, 48,
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-            f"Δ {delta}",
+            f"{icon_symbol} {delta}",
         )
 
         # ── Battery & Time ───────────────────────────────────────────
@@ -1077,7 +1116,7 @@ class GlucoseWidget(QWidget):
         painter.drawText(
             130, 50, 84, 25,
             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
-            f"{minutes_ago}м назад" if minutes_ago < 60 else ">1ч назад",
+            format_time_ago(minutes_ago),
         )
 
         # ── Top accent line ───────────────────────────────────────────

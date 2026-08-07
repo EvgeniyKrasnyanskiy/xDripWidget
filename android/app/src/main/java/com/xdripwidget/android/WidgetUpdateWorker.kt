@@ -5,7 +5,12 @@ import android.appwidget.AppWidgetManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.RectF
+import android.graphics.Typeface
 import android.util.Log
 import android.widget.RemoteViews
 import androidx.work.Worker
@@ -76,7 +81,8 @@ class WidgetUpdateWorker(
                 views.setTextViewText(R.id.tv_glucose, "--.-")
                 views.setTextViewText(R.id.tv_delta, errorMsg ?: "Ошибка")
                 views.setTextViewText(R.id.tv_time, "")
-                views.setTextViewText(R.id.tv_battery, "")
+                val emptyBat = createBatteryBitmap(context, -1, true)
+                views.setImageViewBitmap(R.id.iv_battery, emptyBat)
             } else {
                 val mmol = json.optDouble("mmol", 0.0)
                 val direction = json.optString("direction", "Unknown")
@@ -85,23 +91,24 @@ class WidgetUpdateWorker(
                 val minutesAgo = json.optInt("minutes_ago", 0)
 
                 val arrow = trendArrows[direction] ?: "?"
-                val stale = minutesAgo > 15
+                val stale = minutesAgo > 5
 
                 // Glucose text & color
                 val colorHex = getGlucoseColorHex(mmol, stale)
                 views.setTextViewText(R.id.tv_glucose, String.format(Locale.US, "%.1f %s", mmol, arrow))
                 views.setTextColor(R.id.tv_glucose, Color.parseColor(colorHex))
 
-                // Delta
-                views.setTextViewText(R.id.tv_delta, "Δ $deltaStr")
+                // Delta & Stale Icon
+                val iconSymbol = if (minutesAgo > 5) "🔄" else "Δ"
+                views.setTextViewText(R.id.tv_delta, "$iconSymbol $deltaStr")
 
                 // Time ago
-                val timeStr = if (minutesAgo < 60) "${minutesAgo}м назад" else ">1ч назад"
+                val timeStr = formatTimeAgo(minutesAgo)
                 views.setTextViewText(R.id.tv_time, timeStr)
 
-                // Battery
-                val batStr = if (battery >= 0) "🔋 $battery%" else ""
-                views.setTextViewText(R.id.tv_battery, batStr)
+                // Battery Bar Bitmap
+                val batBitmap = createBatteryBitmap(context, battery, stale)
+                views.setImageViewBitmap(R.id.iv_battery, batBitmap)
             }
 
             // Click on widget triggers manual refresh
@@ -126,9 +133,66 @@ class WidgetUpdateWorker(
 
     private fun getGlucoseColorHex(mmol: Double, stale: Boolean): String {
         if (stale) return "#7f8c8d"
-        if (mmol < 3.3 || mmol > 11.0) return "#e74c3c" // Red
-        if (mmol < 3.9 || mmol > 9.0) return "#f39c12"  // Yellow
-        return "#27ae60"                               // Green
+        if (mmol <= 3.3) return "#e74c3c" // Heavy Hypo (Red)
+        if (mmol < 3.9) return "#f39c12"  // Mild Hypo (Yellow)
+        if (mmol <= 7.8) return "#27ae60" // Target Normal (Green)
+        if (mmol < 10.0) return "#f39c12" // Mild Hyper (Yellow)
+        return "#e57373"                  // Soft Red (Hyper >= 10.0)
+    }
+
+    private fun formatTimeAgo(minutesAgo: Int): String {
+        return when {
+            minutesAgo < 60 -> "$minutesAgo м назад"
+            minutesAgo < 1440 -> "${minutesAgo / 60} ч назад"
+            else -> "${minutesAgo / 1440} д назад"
+        }
+    }
+
+    private fun createBatteryBitmap(context: Context, pct: Int, stale: Boolean): Bitmap {
+        val width = 110
+        val height = 28
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+
+        if (pct < 0) return bitmap
+
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+
+        val bColor = when {
+            stale -> Color.parseColor("#7f8c8d")
+            pct <= 20 -> Color.parseColor("#e74c3c")
+            pct <= 50 -> Color.parseColor("#f39c12")
+            else -> Color.parseColor("#27ae60")
+        }
+
+        // Frame
+        val frameRect = RectF(2f, 4f, 48f, 24f)
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = 2f
+        paint.color = Color.parseColor("#bdc3c7")
+        canvas.drawRoundRect(frameRect, 4f, 4f, paint)
+
+        // Tip
+        val tipRect = RectF(48f, 9f, 51f, 19f)
+        paint.style = Paint.Style.FILL
+        canvas.drawRoundRect(tipRect, 2f, 2f, paint)
+
+        // Fill
+        if (pct > 0) {
+            val fillWidth = (40f * (pct.coerceIn(0, 100) / 100f))
+            val fillRect = RectF(4f, 6f, 4f + fillWidth, 22f)
+            paint.color = bColor
+            canvas.drawRect(fillRect, paint)
+        }
+
+        // Percentage text
+        paint.style = Paint.Style.FILL
+        paint.color = Color.parseColor("#bdc3c7")
+        paint.textSize = 14f
+        paint.typeface = Typeface.DEFAULT_BOLD
+        canvas.drawText("$pct%", 56f, 19f, paint)
+
+        return bitmap
     }
 
     companion object {
