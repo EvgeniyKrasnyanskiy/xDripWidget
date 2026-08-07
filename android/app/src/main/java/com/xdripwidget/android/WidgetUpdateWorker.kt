@@ -149,8 +149,8 @@ class WidgetUpdateWorker(
     }
 
     private fun createBatteryBitmap(pct: Int, stale: Boolean): Bitmap {
-        val width = 110
-        val height = 28
+        val width = 200
+        val height = 48
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
 
@@ -166,21 +166,21 @@ class WidgetUpdateWorker(
         }
 
         // Frame
-        val frameRect = RectF(2f, 4f, 48f, 24f)
+        val frameRect = RectF(3f, 6f, 91f, 42f)
         paint.style = Paint.Style.STROKE
-        paint.strokeWidth = 2f
+        paint.strokeWidth = 3f
         paint.color = Color.parseColor("#bdc3c7")
-        canvas.drawRoundRect(frameRect, 4f, 4f, paint)
+        canvas.drawRoundRect(frameRect, 6f, 6f, paint)
 
         // Tip
-        val tipRect = RectF(48f, 9f, 51f, 19f)
+        val tipRect = RectF(91f, 15f, 97f, 33f)
         paint.style = Paint.Style.FILL
-        canvas.drawRoundRect(tipRect, 2f, 2f, paint)
+        canvas.drawRoundRect(tipRect, 3f, 3f, paint)
 
         // Fill
         if (pct > 0) {
-            val fillWidth = (40f * (pct.coerceIn(0, 100) / 100f))
-            val fillRect = RectF(4f, 6f, 4f + fillWidth, 22f)
+            val fillWidth = (82f * (pct.coerceIn(0, 100) / 100f))
+            val fillRect = RectF(6f, 9f, 6f + fillWidth, 39f)
             paint.color = bColor
             canvas.drawRect(fillRect, paint)
         }
@@ -188,9 +188,9 @@ class WidgetUpdateWorker(
         // Percentage text
         paint.style = Paint.Style.FILL
         paint.color = Color.parseColor("#bdc3c7")
-        paint.textSize = 14f
+        paint.textSize = 24f
         paint.typeface = Typeface.DEFAULT_BOLD
-        canvas.drawText("$pct%", 56f, 19f, paint)
+        canvas.drawText("$pct%", 105f, 33f, paint)
 
         return bitmap
     }
