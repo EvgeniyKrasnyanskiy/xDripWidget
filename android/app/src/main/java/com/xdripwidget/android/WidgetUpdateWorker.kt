@@ -81,7 +81,7 @@ class WidgetUpdateWorker(
                 views.setTextViewText(R.id.tv_glucose, "--.-")
                 views.setTextViewText(R.id.tv_delta, errorMsg ?: "Ошибка")
                 views.setTextViewText(R.id.tv_time, "")
-                val emptyBat = createBatteryBitmap(context, -1, true)
+                val emptyBat = createBatteryBitmap(-1, true)
                 views.setImageViewBitmap(R.id.iv_battery, emptyBat)
             } else {
                 val mmol = json.optDouble("mmol", 0.0)
@@ -107,7 +107,7 @@ class WidgetUpdateWorker(
                 views.setTextViewText(R.id.tv_time, timeStr)
 
                 // Battery Bar Bitmap
-                val batBitmap = createBatteryBitmap(context, battery, stale)
+                val batBitmap = createBatteryBitmap(battery, stale)
                 views.setImageViewBitmap(R.id.iv_battery, batBitmap)
             }
 
@@ -148,7 +148,7 @@ class WidgetUpdateWorker(
         }
     }
 
-    private fun createBatteryBitmap(context: Context, pct: Int, stale: Boolean): Bitmap {
+    private fun createBatteryBitmap(pct: Int, stale: Boolean): Bitmap {
         val width = 110
         val height = 28
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
