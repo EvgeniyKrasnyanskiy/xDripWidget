@@ -110,11 +110,11 @@ class WidgetUpdateWorker(
                 val batBitmap = createBatteryBitmap(battery, stale)
                 views.setImageViewBitmap(R.id.iv_battery, batBitmap)
 
-                // Check alarms
+                // Check 3-cycle alarms
                 checkAlarms(mmol, minutesAgo)
             }
 
-            // Click on widget triggers manual refresh
+            // Click on widget triggers manual refresh / snooze
             val refreshIntent = Intent(context, xDripWidgetProvider::class.java).apply {
                 action = xDripWidgetProvider.ACTION_MANUAL_REFRESH
             }
@@ -140,34 +140,55 @@ class WidgetUpdateWorker(
 
         val lowThreshold = WidgetPreferences.getLowThreshold(context)
         val highThreshold = WidgetPreferences.getHighThreshold(context)
-        val lowSnoozeMs = WidgetPreferences.getLowSnoozeMinutes(context) * 60_000L
-        val highSnoozeMs = WidgetPreferences.getHighSnoozeMinutes(context) * 60_000L
         val now = System.currentTimeMillis()
 
-        val melody = WidgetPreferences.getAlarmMelody(context)
-        val volume = WidgetPreferences.getAlarmVolume(context)
+        val isLow = mmol < lowThreshold
+        val isHigh = mmol > highThreshold
 
-        if (mmol < lowThreshold) {
-            val lastTime = WidgetPreferences.getLastLowAlarmTime(context)
-            if (now - lastTime >= lowSnoozeMs) {
-                Log.d(TAG, "Triggering Low Glucose Alarm (mmol=$mmol < $lowThreshold)")
-                SoundGenerator.playMelodyAsync(melody, volume)
-                WidgetPreferences.setLastLowAlarmTime(context, now)
-            }
-        } else if (mmol > highThreshold) {
-            val lastTime = WidgetPreferences.getLastHighAlarmTime(context)
-            if (now - lastTime >= highSnoozeMs) {
-                Log.d(TAG, "Triggering High Glucose Alarm (mmol=$mmol > $highThreshold)")
-                SoundGenerator.playMelodyAsync(melody, volume)
-                WidgetPreferences.setLastHighAlarmTime(context, now)
-            }
-        } else {
-            // Normal range: reset alarm snooze timestamps
-            if (WidgetPreferences.getLastLowAlarmTime(context) != 0L) {
-                WidgetPreferences.setLastLowAlarmTime(context, 0L)
-            }
-            if (WidgetPreferences.getLastHighAlarmTime(context) != 0L) {
-                WidgetPreferences.setLastHighAlarmTime(context, 0L)
+        if (!isLow && !isHigh) {
+            // Normal range: reset alarm cycle counter and snooze state
+            WidgetPreferences.resetAlarmState(context)
+            SoundGenerator.stopMelody()
+            return
+        }
+
+        // Check if currently snoozed by user tap or auto-snooze
+        val snoozedUntil = WidgetPreferences.getSnoozedUntil(context)
+        if (now < snoozedUntil) {
+            Log.d(TAG, "Alarm is snoozed until $snoozedUntil")
+            return
+        }
+
+        val lowSnoozeMs = WidgetPreferences.getLowSnoozeMinutes(context) * 60_000L
+        val highSnoozeMs = WidgetPreferences.getHighSnoozeMinutes(context) * 60_000L
+        val snoozeMs = if (isLow) lowSnoozeMs else highSnoozeMs
+
+        val cycleCount = WidgetPreferences.getAlarmCycleCount(context)
+        val lastCycleTime = WidgetPreferences.getLastCycleTime(context)
+
+        // 1-minute interval between 1-minute alarm cycles
+        if (now - lastCycleTime >= 60_000L) {
+            if (cycleCount < 3) {
+                val newCount = cycleCount + 1
+                WidgetPreferences.setAlarmCycleCount(context, newCount)
+                WidgetPreferences.setLastCycleTime(context, now)
+                if (isLow) {
+                    WidgetPreferences.setLastLowAlarmTime(context, now)
+                } else {
+                    WidgetPreferences.setLastHighAlarmTime(context, now)
+                }
+
+                val melody = WidgetPreferences.getAlarmMelody(context)
+                val volume = WidgetPreferences.getAlarmVolume(context)
+
+                Log.d(TAG, "Triggering alarm cycle $newCount/3 for mmol=$mmol")
+                SoundGenerator.playAlarmCycleAsync(melody, volume, 60_000L)
+            } else {
+                // 3 cycles finished without user tap -> auto-snooze for 30m / 60m!
+                Log.d(TAG, "Completed 3 alarm cycles without user tap. Auto-snoozing for $snoozeMs ms.")
+                SoundGenerator.stopMelody()
+                WidgetPreferences.setSnoozedUntil(context, now + snoozeMs)
+                WidgetPreferences.setAlarmCycleCount(context, 0)
             }
         }
     }

@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.Intent
 import android.util.Log
 import android.widget.RemoteViews
+import android.widget.Toast
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
@@ -29,6 +30,29 @@ class xDripWidgetProvider : AppWidgetProvider() {
         super.onReceive(context, intent)
         if (intent.action == ACTION_MANUAL_REFRESH) {
             Log.d(TAG, "Manual refresh click received")
+
+            // Stop alarm sound immediately on tap
+            SoundGenerator.stopMelody()
+
+            val now = System.currentTimeMillis()
+            val cycleCount = WidgetPreferences.getAlarmCycleCount(context)
+            val snoozedUntil = WidgetPreferences.getSnoozedUntil(context)
+
+            // If an unacknowledged alarm cycle was in progress or active
+            if (cycleCount > 0 || now < snoozedUntil) {
+                val lowThreshold = WidgetPreferences.getLowThreshold(context)
+                val lowSnoozeMin = WidgetPreferences.getLowSnoozeMinutes(context)
+                val highSnoozeMin = WidgetPreferences.getHighSnoozeMinutes(context)
+
+                // Snooze based on low or high duration
+                val snoozeMin = if (WidgetPreferences.getLastLowAlarmTime(context) > 0) lowSnoozeMin else highSnoozeMin
+                val newSnoozeUntil = now + (snoozeMin * 60_000L)
+                WidgetPreferences.setSnoozedUntil(context, newSnoozeUntil)
+                WidgetPreferences.setAlarmCycleCount(context, 0)
+
+                Toast.makeText(context, "Тревога отложена на $snoozeMin мин", Toast.LENGTH_SHORT).show()
+            }
+
             // Immediate visual feedback
             showRefreshingState(context)
             enqueueOneTimeUpdate(context)

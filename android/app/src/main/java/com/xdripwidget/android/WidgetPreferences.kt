@@ -121,6 +121,40 @@ object WidgetPreferences {
         getPrefs(context).edit().putLong(KEY_LAST_HIGH_ALARM_TIME, timeMs).apply()
     }
 
+    fun getAlarmCycleCount(context: Context): Int {
+        return getPrefs(context).getInt(KEY_ALARM_CYCLE_COUNT, 0)
+    }
+
+    fun setAlarmCycleCount(context: Context, count: Int) {
+        getPrefs(context).edit().putInt(KEY_ALARM_CYCLE_COUNT, count).apply()
+    }
+
+    fun getLastCycleTime(context: Context): Long {
+        return getPrefs(context).getLong(KEY_LAST_CYCLE_TIME, 0L)
+    }
+
+    fun setLastCycleTime(context: Context, timeMs: Long) {
+        getPrefs(context).edit().putLong(KEY_LAST_CYCLE_TIME, timeMs).apply()
+    }
+
+    fun getSnoozedUntil(context: Context): Long {
+        return getPrefs(context).getLong(KEY_SNOOZED_UNTIL, 0L)
+    }
+
+    fun setSnoozedUntil(context: Context, timeMs: Long) {
+        getPrefs(context).edit().putLong(KEY_SNOOZED_UNTIL, timeMs).apply()
+    }
+
+    fun resetAlarmState(context: Context) {
+        getPrefs(context).edit()
+            .putInt(KEY_ALARM_CYCLE_COUNT, 0)
+            .putLong(KEY_LAST_CYCLE_TIME, 0L)
+            .putLong(KEY_SNOOZED_UNTIL, 0L)
+            .putLong(KEY_LAST_LOW_ALARM_TIME, 0L)
+            .putLong(KEY_LAST_HIGH_ALARM_TIME, 0L)
+            .apply()
+    }
+
     private const val KEY_ALARM_ENABLED = "alarm_enabled"
     private const val KEY_LOW_THRESHOLD = "low_threshold"
     private const val KEY_HIGH_THRESHOLD = "high_threshold"
@@ -130,4 +164,7 @@ object WidgetPreferences {
     private const val KEY_ALARM_MELODY = "alarm_melody"
     private const val KEY_LAST_LOW_ALARM_TIME = "last_low_alarm_time"
     private const val KEY_LAST_HIGH_ALARM_TIME = "last_high_alarm_time"
+    private const val KEY_ALARM_CYCLE_COUNT = "alarm_cycle_count"
+    private const val KEY_LAST_CYCLE_TIME = "last_cycle_time"
+    private const val KEY_SNOOZED_UNTIL = "snoozed_until"
 }

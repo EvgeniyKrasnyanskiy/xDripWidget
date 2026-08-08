@@ -9,13 +9,98 @@ import kotlin.math.sin
 object SoundGenerator {
     private const val SAMPLE_RATE = 44100
 
-    fun playMelodyAsync(melodyIndex: Int, volumePercent: Int) {
-        thread {
-            playMelody(melodyIndex, volumePercent)
+    @Volatile
+    private var currentTrack: AudioTrack? = null
+
+    @Volatile
+    private var isPlaying = false
+
+    fun stopMelody() {
+        isPlaying = false
+        try {
+            currentTrack?.let {
+                if (it.playState == AudioTrack.PLAYSTATE_PLAYING) {
+                    it.stop()
+                }
+                it.release()
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        } finally {
+            currentTrack = null
         }
     }
 
-    fun playMelody(melodyIndex: Int, volumePercent: Int) {
+    fun playMelodyAsync(melodyIndex: Int, volumePercent: Int) {
+        stopMelody()
+        thread {
+            playMelodyOnce(melodyIndex, volumePercent)
+        }
+    }
+
+    fun playAlarmCycleAsync(melodyIndex: Int, volumePercent: Int, durationMs: Long = 60_000L) {
+        stopMelody()
+        thread {
+            isPlaying = true
+            val pcmData = generatePcm(melodyIndex)
+            if (pcmData.isEmpty()) return@thread
+
+            val vol = (volumePercent.coerceIn(0, 100) / 100f)
+
+            try {
+                val audioAttributes = AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_ALARM)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build()
+
+                val audioFormat = AudioFormat.Builder()
+                    .setSampleRate(SAMPLE_RATE)
+                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                    .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                    .build()
+
+                val track = AudioTrack.Builder()
+                    .setAudioAttributes(audioAttributes)
+                    .setAudioFormat(audioFormat)
+                    .setBufferSizeInBytes(pcmData.size)
+                    .setTransferMode(AudioTrack.MODE_STATIC)
+                    .build()
+
+                currentTrack = track
+                track.setVolume(vol)
+                track.write(pcmData, 0, pcmData.size)
+
+                val singleDurationMs = (pcmData.size.toDouble() / (SAMPLE_RATE * 2) * 1000).toLong()
+                val startTime = System.currentTimeMillis()
+
+                while (isPlaying && (System.currentTimeMillis() - startTime) < durationMs) {
+                    track.stop()
+                    track.setPlaybackHeadPosition(0)
+                    track.play()
+                    
+                    val sleepStep = 100L
+                    var elapsed = 0L
+                    val totalSleep = singleDurationMs + 200L
+                    while (isPlaying && elapsed < totalSleep) {
+                        Thread.sleep(sleepStep)
+                        elapsed += sleepStep
+                    }
+                }
+
+                track.stop()
+                track.release()
+            } catch (e: Exception) {
+                e.printStackTrace()
+            } finally {
+                if (currentTrack === currentTrack) {
+                    currentTrack = null
+                }
+                isPlaying = false
+            }
+        }
+    }
+
+    private fun playMelodyOnce(melodyIndex: Int, volumePercent: Int) {
         val pcmData = generatePcm(melodyIndex)
         if (pcmData.isEmpty()) return
 
@@ -40,16 +125,25 @@ object SoundGenerator {
                 .setTransferMode(AudioTrack.MODE_STATIC)
                 .build()
 
+            currentTrack = track
+            isPlaying = true
             track.setVolume(vol)
             track.write(pcmData, 0, pcmData.size)
             track.play()
 
             val durationMs = (pcmData.size.toDouble() / (SAMPLE_RATE * 2) * 1000).toLong()
-            Thread.sleep(durationMs + 100)
+            var elapsed = 0L
+            while (isPlaying && elapsed < durationMs + 100L) {
+                Thread.sleep(50L)
+                elapsed += 50L
+            }
             track.stop()
             track.release()
         } catch (e: Exception) {
             e.printStackTrace()
+        } finally {
+            currentTrack = null
+            isPlaying = false
         }
     }
 
