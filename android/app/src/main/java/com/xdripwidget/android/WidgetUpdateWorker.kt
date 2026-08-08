@@ -106,9 +106,12 @@ class WidgetUpdateWorker(
                 val timeStr = formatTimeAgo(minutesAgo)
                 views.setTextViewText(R.id.tv_time, timeStr)
 
-                // Battery Bar Bitmap
+                // Battery Bar Bitmap (scaled 1.5x smaller on both sides)
                 val batBitmap = createBatteryBitmap(battery, stale)
                 views.setImageViewBitmap(R.id.iv_battery, batBitmap)
+
+                // Check alarms
+                checkAlarms(mmol, minutesAgo)
             }
 
             // Click on widget triggers manual refresh
@@ -131,6 +134,44 @@ class WidgetUpdateWorker(
         }
     }
 
+    private fun checkAlarms(mmol: Double, minutesAgo: Int) {
+        if (!WidgetPreferences.isAlarmEnabled(context)) return
+        if (minutesAgo > 5 || mmol <= 0.0) return
+
+        val lowThreshold = WidgetPreferences.getLowThreshold(context)
+        val highThreshold = WidgetPreferences.getHighThreshold(context)
+        val lowSnoozeMs = WidgetPreferences.getLowSnoozeMinutes(context) * 60_000L
+        val highSnoozeMs = WidgetPreferences.getHighSnoozeMinutes(context) * 60_000L
+        val now = System.currentTimeMillis()
+
+        val melody = WidgetPreferences.getAlarmMelody(context)
+        val volume = WidgetPreferences.getAlarmVolume(context)
+
+        if (mmol < lowThreshold) {
+            val lastTime = WidgetPreferences.getLastLowAlarmTime(context)
+            if (now - lastTime >= lowSnoozeMs) {
+                Log.d(TAG, "Triggering Low Glucose Alarm (mmol=$mmol < $lowThreshold)")
+                SoundGenerator.playMelodyAsync(melody, volume)
+                WidgetPreferences.setLastLowAlarmTime(context, now)
+            }
+        } else if (mmol > highThreshold) {
+            val lastTime = WidgetPreferences.getLastHighAlarmTime(context)
+            if (now - lastTime >= highSnoozeMs) {
+                Log.d(TAG, "Triggering High Glucose Alarm (mmol=$mmol > $highThreshold)")
+                SoundGenerator.playMelodyAsync(melody, volume)
+                WidgetPreferences.setLastHighAlarmTime(context, now)
+            }
+        } else {
+            // Normal range: reset alarm snooze timestamps
+            if (WidgetPreferences.getLastLowAlarmTime(context) != 0L) {
+                WidgetPreferences.setLastLowAlarmTime(context, 0L)
+            }
+            if (WidgetPreferences.getLastHighAlarmTime(context) != 0L) {
+                WidgetPreferences.setLastHighAlarmTime(context, 0L)
+            }
+        }
+    }
+
     private fun getGlucoseColorHex(mmol: Double, stale: Boolean): String {
         if (stale) return "#7f8c8d"
         if (mmol <= 3.3) return "#e74c3c" // Heavy Hypo (Red)
@@ -149,12 +190,15 @@ class WidgetUpdateWorker(
     }
 
     private fun createBatteryBitmap(pct: Int, stale: Boolean): Bitmap {
-        val width = 140
-        val height = 34
+        val scale = 1.5f
+        val width = (140 / scale).toInt()
+        val height = (34 / scale).toInt()
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
 
         if (pct < 0) return bitmap
+
+        canvas.scale(1f / scale, 1f / scale)
 
         val paint = Paint(Paint.ANTI_ALIAS_FLAG)
 

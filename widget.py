@@ -383,6 +383,7 @@ class TreatmentDialog(QDialog):
         # --- Insulin ---
         self._insulin_spin = QDoubleSpinBox()
         self._insulin_spin.setRange(0, 100)
+        self._insulin_spin.setSingleStep(0.1)
         self._insulin_spin.setDecimals(2)
         self._insulin_spin.setSuffix(" ЕД")
 
@@ -1128,7 +1129,7 @@ class GlucoseWidget(QWidget):
 
     def _draw_battery_bar(self, painter: QPainter, pct: int, stale: bool):
         BAR_X, BAR_Y = 6,  54
-        BAR_W, BAR_H = 72, 13
+        BAR_W, BAR_H = 36, 13
         CAP_W, CAP_H = 4,   6
         RADIUS = 2
 
