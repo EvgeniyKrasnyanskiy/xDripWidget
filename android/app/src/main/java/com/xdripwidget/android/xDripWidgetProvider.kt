@@ -40,7 +40,6 @@ class xDripWidgetProvider : AppWidgetProvider() {
 
             // If an unacknowledged alarm cycle was in progress or active
             if (cycleCount > 0 || now < snoozedUntil) {
-                val lowThreshold = WidgetPreferences.getLowThreshold(context)
                 val lowSnoozeMin = WidgetPreferences.getLowSnoozeMinutes(context)
                 val highSnoozeMin = WidgetPreferences.getHighSnoozeMinutes(context)
 
