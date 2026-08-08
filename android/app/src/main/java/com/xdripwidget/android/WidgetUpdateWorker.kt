@@ -211,15 +211,14 @@ class WidgetUpdateWorker(
     }
 
     private fun createBatteryBitmap(pct: Int, stale: Boolean): Bitmap {
-        val scale = 1.5f
-        val width = (140 / scale).toInt()
-        val height = (34 / scale).toInt()
+        val width = 186
+        val height = 44
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
 
         if (pct < 0) return bitmap
 
-        canvas.scale(1f / scale, 1f / scale)
+        canvas.scale(width / 140f, height / 34f)
 
         val paint = Paint(Paint.ANTI_ALIAS_FLAG)
 
