@@ -42,3 +42,10 @@ desktop.ini
 build/
 dist/
 *.spec
+
+# Android
+.gradle/
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
