@@ -123,7 +123,7 @@ logger.info("=================== xDrip Widget Initializing ===================")
 # Constants
 # ---------------------------------------------------------------------------
 APP_NAME     = "xDrip Widget"
-APP_VERSION  = "1.7.0"
+APP_VERSION  = "1.8.0"
 ORG_NAME     = "xdripwidget"
 INSTANCE_KEY = "xDripWidgetSingleInstance"
 DEFAULT_URL  = "http://localhost:8080"
@@ -356,6 +356,24 @@ EVENT_TYPES_MAP: dict[str, str] = {
 
 
 # ---------------------------------------------------------------------------
+# Custom SpinBox with asymmetric steps (e.g. increase by step_up, decrease by step_down)
+# ---------------------------------------------------------------------------
+class AsymmetricDoubleSpinBox(QDoubleSpinBox):
+    def __init__(self, step_up: float, step_down: float, parent=None):
+        super().__init__(parent)
+        self._step_up = step_up
+        self._step_down = step_down
+
+    def stepBy(self, steps: int):
+        if steps > 0:
+            val = self.value() + self._step_up * steps
+        else:
+            val = self.value() + self._step_down * float(steps)
+        val = max(self.minimum(), min(self.maximum(), val))
+        self.setValue(round(val, self.decimals()))
+
+
+# ---------------------------------------------------------------------------
 # Treatments dialog (Insulin, Carbs, Blood Glucose input + datetime)
 # ---------------------------------------------------------------------------
 class TreatmentDialog(QDialog):
@@ -374,16 +392,15 @@ class TreatmentDialog(QDialog):
         self._glucose_spin.setSuffix(" ммоль/л")
         self._glucose_spin.setSpecialValueText("Не указано")
 
-        # --- Carbs ---
-        self._carbs_spin = QDoubleSpinBox()
+        # --- Carbs (step up +1.0g, step down -0.5g) ---
+        self._carbs_spin = AsymmetricDoubleSpinBox(step_up=1.0, step_down=0.5)
         self._carbs_spin.setRange(0, 500)
         self._carbs_spin.setDecimals(1)
         self._carbs_spin.setSuffix(" г")
 
-        # --- Insulin ---
-        self._insulin_spin = QDoubleSpinBox()
+        # --- Insulin (step up +0.1U, step down -0.05U) ---
+        self._insulin_spin = AsymmetricDoubleSpinBox(step_up=0.1, step_down=0.05)
         self._insulin_spin.setRange(0, 100)
-        self._insulin_spin.setSingleStep(0.1)
         self._insulin_spin.setDecimals(2)
         self._insulin_spin.setSuffix(" ЕД")
 
@@ -409,15 +426,15 @@ class TreatmentDialog(QDialog):
         form.addRow("Дата/Время:", self._datetime_edit)
         form.addRow("Заметка:", self._notes_edit)
 
-        buttons = QDialogButtonBox(
+        self._buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
-        buttons.accepted.connect(self._submit)
-        buttons.rejected.connect(self.reject)
+        self._buttons.accepted.connect(self._submit)
+        self._buttons.rejected.connect(self.reject)
 
         layout = QVBoxLayout(self)
         layout.addLayout(form)
-        layout.addWidget(buttons)
+        layout.addWidget(self._buttons)
 
         self._event_type_combo.currentTextChanged.connect(self._on_event_type_changed)
 
@@ -502,8 +519,12 @@ class TreatmentDialog(QDialog):
             with urllib.request.urlopen(req, timeout=8) as resp:
                 pass
             logger.info(f"Treatment submitted successfully: {event_type}")
-            QMessageBox.information(self, "Успешно", "Данные отправлены на сервер!")
-            self.accept()
+            self._buttons.setEnabled(False)
+            ok_btn = self._buttons.button(QDialogButtonBox.StandardButton.Ok)
+            if ok_btn:
+                ok_btn.setText("✔ Успешно")
+                ok_btn.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold; font-size: 13px; border-radius: 4px;")
+            QTimer.singleShot(1000, self.accept)
         except Exception as e:
             logger.error(f"Failed to submit treatment: {e}")
             QMessageBox.critical(self, "Ошибка", f"Не удалось отправить данные:\n{e}")
@@ -797,6 +818,7 @@ class GlucoseWidget(QWidget):
     def __init__(self):
         super().__init__()
         self._drag_pos: Optional[QPoint] = None
+        self._drag_start_pos: Optional[QPoint] = None
         self._data: Optional[dict] = None
         self._history: list[dict] = []
         self._error: Optional[str] = None
@@ -1253,6 +1275,7 @@ class GlucoseWidget(QWidget):
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self._drag_pos = event.globalPosition().toPoint() - self.pos()
+            self._drag_start_pos = event.globalPosition().toPoint()
         elif event.button() == Qt.MouseButton.RightButton:
             self._show_context_menu(event.globalPosition().toPoint())
 
@@ -1260,8 +1283,14 @@ class GlucoseWidget(QWidget):
         if self._drag_pos and event.buttons() == Qt.MouseButton.LeftButton:
             self.move(event.globalPosition().toPoint() - self._drag_pos)
 
-    def mouseReleaseEvent(self, _event):
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton and self._drag_start_pos is not None:
+            delta = (event.globalPosition().toPoint() - self._drag_start_pos).manhattanLength()
+            if delta < 5:
+                logger.debug("LMB click detected -> refreshing data")
+                self._fetch()
         self._drag_pos = None
+        self._drag_start_pos = None
         try:
             s = get_settings()
             s.setValue("position", self.pos())

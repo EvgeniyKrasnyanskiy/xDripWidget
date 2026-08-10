@@ -11,8 +11,8 @@ android {
         applicationId = "com.xdripwidget.android"
         minSdk = 24
         targetSdk = 34
-        versionCode = 4
-        versionName = "1.7.0"
+        versionCode = 5
+        versionName = "1.8.0"
     }
 
     buildTypes {
