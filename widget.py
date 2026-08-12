@@ -123,7 +123,7 @@ logger.info("=================== xDrip Widget Initializing ===================")
 # Constants
 # ---------------------------------------------------------------------------
 APP_NAME     = "xDrip Widget"
-APP_VERSION  = "1.8.0"
+APP_VERSION  = "1.8.1"
 ORG_NAME     = "xdripwidget"
 INSTANCE_KEY = "xDripWidgetSingleInstance"
 DEFAULT_URL  = "http://localhost:8080"
@@ -257,6 +257,29 @@ def create_blood_drop_icon(color: QColor, size: int = 32) -> QIcon:
 # ---------------------------------------------------------------------------
 # Worker threads
 # ---------------------------------------------------------------------------
+def format_network_error(exc: Exception) -> str:
+    """Format technical network exceptions into clean user-friendly Russian messages."""
+    if isinstance(exc, urllib.error.HTTPError):
+        return f"Ошибка сервера (HTTP {exc.code})"
+
+    exc_str = str(exc)
+    exc_repr = repr(exc)
+    combined = f"{exc_str} {exc_repr}".lower()
+
+    if "timed out" in combined or "timeout" in combined:
+        return "Таймаут соединения"
+    if "getaddrinfo failed" in combined or "11001" in combined:
+        return "Сервер не найден"
+    if "connection refused" in combined or "10061" in combined:
+        return "Сервер недоступен"
+    if "winerror" in combined or "попытка" in combined or "10051" in combined or "10065" in combined or "10054" in combined or "10038" in combined:
+        return "Нет подключения к сети"
+    if isinstance(exc, urllib.error.URLError):
+        return "Нет связи с сервером"
+
+    return "Ошибка подключения"
+
+
 class FetchWorker(QThread):
     data_ready  = pyqtSignal(dict, list)  # current_data, history_list
     fetch_error = pyqtSignal(str)
@@ -309,11 +332,11 @@ class FetchWorker(QThread):
         except urllib.error.HTTPError as e:
             if not self._cancelled:
                 logger.error(f"FetchWorker HTTP error: {e.code}")
-                self.fetch_error.emit(f"HTTP {e.code}")
+                self.fetch_error.emit(format_network_error(e))
         except Exception as exc:
             if not self._cancelled:
                 logger.error(f"FetchWorker error: {exc}")
-                self.fetch_error.emit(str(exc))
+                self.fetch_error.emit(format_network_error(exc))
 
 
 class UpdateCheckerWorker(QThread):
@@ -1091,12 +1114,46 @@ class GlucoseWidget(QWidget):
         painter.fillPath(path, COLOR_BG)
 
         if self._error or not self._data:
-            painter.setPen(COLOR_GRAY)
-            painter.setFont(self._font_med)
+            top_color = COLOR_SOFT_RED if self._error else COLOR_GRAY
+            painter.setPen(QPen(top_color, 2))
+            painter.drawLine(14, 2, self.width() - 14, 2)
+
+            if not self._data and not self._error:
+                painter.setPen(COLOR_SUB)
+                painter.setFont(self._font_med)
+                painter.drawText(
+                    0, 0, self.width(), self.height(),
+                    Qt.AlignmentFlag.AlignCenter,
+                    "Загрузка…",
+                )
+                return
+
+            err_title = self._error or "Нет связи с сервером"
+
+            # Status Icon
+            painter.setPen(COLOR_SOFT_RED)
+            painter.setFont(QFont("Segoe UI", 16))
             painter.drawText(
-                0, 0, self.width(), 80,
+                0, 16, self.width(), 28,
                 Qt.AlignmentFlag.AlignCenter,
-                self._error or "Загрузка…",
+                "📡❌",
+            )
+
+            # Error Title
+            painter.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+            painter.drawText(
+                8, 48, self.width() - 16, 24,
+                Qt.AlignmentFlag.AlignCenter,
+                err_title,
+            )
+
+            # Subtitle / Hint with word wrap
+            painter.setPen(COLOR_GRAY)
+            painter.setFont(self._font_sml)
+            painter.drawText(
+                12, 74, self.width() - 24, 60,
+                Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap,
+                "Проверьте интернет-соединение или адрес сервера",
             )
             return
 
