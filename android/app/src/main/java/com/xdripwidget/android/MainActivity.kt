@@ -166,7 +166,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun showAboutDialog() {
         val aboutText = """
-            xDrip Widget v1.7.0
+            xDrip Widget v1.9.0
             
             Мобильный виджет мониторинга уровня глюкозы крови.
             Совместим с xDrip+, AAPS (AndroidAPS) и Nightscout.
