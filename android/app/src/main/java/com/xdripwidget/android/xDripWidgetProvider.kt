@@ -1,10 +1,13 @@
 package com.xdripwidget.android
 
+import android.app.AlarmManager
+import android.app.PendingIntent
 import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProvider
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.util.Log
 import android.widget.RemoteViews
 import android.widget.Toast
@@ -23,38 +26,51 @@ class xDripWidgetProvider : AppWidgetProvider() {
     ) {
         Log.d(TAG, "onUpdate triggered for ${appWidgetIds.size} widgets")
         enqueueOneTimeUpdate(context)
-        schedulePeriodicWork(context)
+        scheduleExactAlarm(context)
+        schedulePeriodicWorkBackup(context)
     }
 
     override fun onReceive(context: Context, intent: Intent) {
         super.onReceive(context, intent)
-        if (intent.action == ACTION_MANUAL_REFRESH) {
-            Log.d(TAG, "Manual refresh click received")
+        val action = intent.action
+        Log.d(TAG, "onReceive: action=$action")
 
-            // Stop alarm sound immediately on tap
-            SoundGenerator.stopMelody()
+        when (action) {
+            ACTION_MANUAL_REFRESH -> {
+                Log.d(TAG, "Manual refresh click received")
 
-            val now = System.currentTimeMillis()
-            val cycleCount = WidgetPreferences.getAlarmCycleCount(context)
-            val snoozedUntil = WidgetPreferences.getSnoozedUntil(context)
+                // Stop alarm sound immediately on tap
+                SoundGenerator.stopMelody()
 
-            // If an unacknowledged alarm cycle was in progress or active
-            if (cycleCount > 0 || now < snoozedUntil) {
-                val lowSnoozeMin = WidgetPreferences.getLowSnoozeMinutes(context)
-                val highSnoozeMin = WidgetPreferences.getHighSnoozeMinutes(context)
+                val now = System.currentTimeMillis()
+                val cycleCount = WidgetPreferences.getAlarmCycleCount(context)
+                val snoozedUntil = WidgetPreferences.getSnoozedUntil(context)
 
-                // Snooze based on low or high duration
-                val snoozeMin = if (WidgetPreferences.getLastLowAlarmTime(context) > 0) lowSnoozeMin else highSnoozeMin
-                val newSnoozeUntil = now + (snoozeMin * 60_000L)
-                WidgetPreferences.setSnoozedUntil(context, newSnoozeUntil)
-                WidgetPreferences.setAlarmCycleCount(context, 0)
+                // If an unacknowledged alarm cycle was in progress or active
+                if (cycleCount > 0 || now < snoozedUntil) {
+                    val lowSnoozeMin = WidgetPreferences.getLowSnoozeMinutes(context)
+                    val highSnoozeMin = WidgetPreferences.getHighSnoozeMinutes(context)
 
-                Toast.makeText(context, "Тревога отложена на $snoozeMin мин", Toast.LENGTH_SHORT).show()
+                    // Snooze based on low or high duration
+                    val snoozeMin = if (WidgetPreferences.getLastLowAlarmTime(context) > 0) lowSnoozeMin else highSnoozeMin
+                    val newSnoozeUntil = now + (snoozeMin * 60_000L)
+                    WidgetPreferences.setSnoozedUntil(context, newSnoozeUntil)
+                    WidgetPreferences.setAlarmCycleCount(context, 0)
+
+                    Toast.makeText(context, "Тревога отложена на $snoozeMin мин", Toast.LENGTH_SHORT).show()
+                }
+
+                // Immediate visual feedback
+                showRefreshingState(context)
+                enqueueOneTimeUpdate(context)
+                scheduleExactAlarm(context)
             }
 
-            // Immediate visual feedback
-            showRefreshingState(context)
-            enqueueOneTimeUpdate(context)
+            ACTION_ALARM_TICK, Intent.ACTION_BOOT_COMPLETED -> {
+                Log.d(TAG, "Alarm tick / Boot completed -> updating widget")
+                enqueueOneTimeUpdate(context)
+                scheduleExactAlarm(context)
+            }
         }
     }
 
@@ -76,23 +92,75 @@ class xDripWidgetProvider : AppWidgetProvider() {
 
     override fun onEnabled(context: Context) {
         super.onEnabled(context)
-        schedulePeriodicWork(context)
+        scheduleExactAlarm(context)
+        schedulePeriodicWorkBackup(context)
     }
 
     override fun onDisabled(context: Context) {
         super.onDisabled(context)
+        cancelAlarm(context)
         WorkManager.getInstance(context).cancelUniqueWork(WORK_TAG)
     }
 
     companion object {
         private const val TAG = "xDripWidgetProvider"
         const val ACTION_MANUAL_REFRESH = "com.xdripwidget.android.MANUAL_REFRESH"
+        const val ACTION_ALARM_TICK = "com.xdripwidget.android.ALARM_TICK"
         private const val WORK_TAG = "xDripWidgetPeriodicWork"
+        private const val ALARM_REQ_CODE = 1001
 
-        fun schedulePeriodicWork(context: Context) {
-            val interval = WidgetPreferences.getRefreshInterval(context).coerceAtLeast(15).toLong()
+        fun scheduleExactAlarm(context: Context) {
+            try {
+                val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
+                val intervalMinutes = WidgetPreferences.getRefreshInterval(context).coerceIn(1, 60)
+                val triggerAt = System.currentTimeMillis() + (intervalMinutes * 60_000L)
+
+                val intent = Intent(context, xDripWidgetProvider::class.java).apply {
+                    action = ACTION_ALARM_TICK
+                }
+                val pendingIntent = PendingIntent.getBroadcast(
+                    context,
+                    ALARM_REQ_CODE,
+                    intent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pendingIntent)
+                } else {
+                    alarmManager.set(AlarmManager.RTC_WAKEUP, triggerAt, pendingIntent)
+                }
+                Log.d(TAG, "Scheduled exact alarm for +$intervalMinutes min ($triggerAt)")
+            } catch (e: Exception) {
+                Log.e(TAG, "Error scheduling alarm: ${e.message}", e)
+            }
+        }
+
+        fun cancelAlarm(context: Context) {
+            try {
+                val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
+                val intent = Intent(context, xDripWidgetProvider::class.java).apply {
+                    action = ACTION_ALARM_TICK
+                }
+                val pendingIntent = PendingIntent.getBroadcast(
+                    context,
+                    ALARM_REQ_CODE,
+                    intent,
+                    PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
+                )
+                if (pendingIntent != null) {
+                    alarmManager.cancel(pendingIntent)
+                    pendingIntent.cancel()
+                    Log.d(TAG, "Alarm cancelled")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error cancelling alarm: ${e.message}", e)
+            }
+        }
+
+        fun schedulePeriodicWorkBackup(context: Context) {
             val periodicRequest = PeriodicWorkRequestBuilder<WidgetUpdateWorker>(
-                interval, TimeUnit.MINUTES
+                15, TimeUnit.MINUTES
             ).build()
 
             WorkManager.getInstance(context).enqueueUniquePeriodicWork(

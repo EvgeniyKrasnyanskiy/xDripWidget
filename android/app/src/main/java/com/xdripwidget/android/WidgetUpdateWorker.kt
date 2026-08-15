@@ -211,8 +211,9 @@ class WidgetUpdateWorker(
     }
 
     private fun createBatteryBitmap(pct: Int, stale: Boolean): Bitmap {
-        val width = 186
-        val height = 44
+        val density = context.resources.displayMetrics.density.coerceAtLeast(1.0f)
+        val width = (93 * density).toInt().coerceAtLeast(93)
+        val height = (22 * density).toInt().coerceAtLeast(22)
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
 

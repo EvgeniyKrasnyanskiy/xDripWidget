@@ -36,7 +36,9 @@ from typing import Optional
 from PyQt6.QtCore import (
     QDateTime,
     QPoint,
+    QRectF,
     QSettings,
+    QStandardPaths,
     Qt,
     QThread,
     QTimer,
@@ -168,16 +170,31 @@ COLOR_BG       = QColor(20, 20, 30)
 COLOR_SUB      = QColor("#bdc3c7")
 
 
+def get_config_path() -> str:
+    """Return the configuration file path, supporting local portable config.ini and standard OS app data."""
+    if os.path.exists(CONFIG_FILE):
+        return CONFIG_FILE
+    try:
+        app_data_dir = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppConfigLocation)
+        if app_data_dir:
+            os.makedirs(app_data_dir, exist_ok=True)
+            return os.path.join(app_data_dir, "config.ini")
+    except Exception as exc:
+        logger.warning(f"Failed to get AppConfigLocation: {exc}")
+    return CONFIG_FILE
+
+
 def get_settings() -> QSettings:
     """Return QSettings instance bound to config.ini, gracefully creating defaults if missing."""
-    if not os.path.exists(CONFIG_FILE):
+    config_path = get_config_path()
+    if not os.path.exists(config_path):
         try:
-            with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+            with open(config_path, "w", encoding="utf-8") as f:
                 f.write("[General]\nserver_url = http://localhost:8080\napi_secret = \ntransparency = 10\nopacity = 90\n\n[Logging]\nlog_level = INFO\n")
-            logger.info("Created default config.ini file")
+            logger.info(f"Created default config file at {config_path}")
         except Exception as e:
-            logger.error(f"Error creating config.ini: {e}")
-    return QSettings(CONFIG_FILE, QSettings.Format.IniFormat)
+            logger.error(f"Error creating config at {config_path}: {e}")
+    return QSettings(config_path, QSettings.Format.IniFormat)
 
 
 def get_window_opacity(s: QSettings) -> float:
@@ -965,10 +982,8 @@ class GlucoseWidget(QWidget):
                     self._worker.fetch_error.disconnect()
                 except Exception:
                     pass
-                return
-            else:
-                logger.debug("_fetch(): cleaning up finished worker reference")
-                self._worker = None
+                self._worker.wait(100)
+            self._worker = None
 
         s      = get_settings()
         url    = str(s.value("server_url", DEFAULT_URL))
@@ -1248,7 +1263,10 @@ class GlucoseWidget(QWidget):
         if not self._history or len(self._history) < 2:
             return
 
-        GX, GY, GW, GH = 10, 78, 200, 42
+        GX = 10
+        GY = 78
+        GW = max(100, self.width() - 20)
+        GH = 42
 
         min_val = 2.5
         max_val = 14.0
@@ -1266,8 +1284,17 @@ class GlucoseWidget(QWidget):
             return GY + GH - (ratio * GH)
 
         y_lo = val_to_y(3.9)
-        y_hi = val_to_y(9.0)
-        painter.setPen(QPen(QColor(255, 255, 255, 35), 1, Qt.PenStyle.DashLine))
+        y_hi = val_to_y(7.8)
+
+        # ── Target Range Corridor (TIR 3.9 - 7.8 mmol/L) ──────────────
+        top_corridor = max(GY, min(GY + GH, y_hi))
+        bot_corridor = max(GY, min(GY + GH, y_lo))
+        if bot_corridor > top_corridor:
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QBrush(QColor(39, 174, 96, 25)))
+            painter.drawRect(QRectF(GX, top_corridor, GW, bot_corridor - top_corridor))
+
+        painter.setPen(QPen(QColor(39, 174, 96, 80), 1, Qt.PenStyle.DashLine))
         if GY <= y_lo <= GY + GH:
             painter.drawLine(GX, int(y_lo), GX + GW, int(y_lo))
         if GY <= y_hi <= GY + GH:

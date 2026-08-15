@@ -152,7 +152,8 @@ class MainActivity : AppCompatActivity() {
 
             // Trigger immediate widget refresh
             xDripWidgetProvider.enqueueOneTimeUpdate(this)
-            xDripWidgetProvider.schedulePeriodicWork(this)
+            xDripWidgetProvider.scheduleExactAlarm(this)
+            xDripWidgetProvider.schedulePeriodicWorkBackup(this)
 
             Toast.makeText(this, "Настройки сохранены! Виджет обновляется...", Toast.LENGTH_SHORT).show()
             finish()
