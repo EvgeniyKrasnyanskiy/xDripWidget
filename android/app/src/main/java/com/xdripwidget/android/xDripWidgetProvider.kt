@@ -8,6 +8,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.os.Bundle
 import android.util.Log
 import android.widget.RemoteViews
 import android.widget.Toast
@@ -28,6 +29,17 @@ class xDripWidgetProvider : AppWidgetProvider() {
         enqueueOneTimeUpdate(context)
         scheduleExactAlarm(context)
         schedulePeriodicWorkBackup(context)
+    }
+
+    override fun onAppWidgetOptionsChanged(
+        context: Context,
+        appWidgetManager: AppWidgetManager,
+        appWidgetId: Int,
+        newOptions: Bundle
+    ) {
+        super.onAppWidgetOptionsChanged(context, appWidgetManager, appWidgetId, newOptions)
+        Log.d(TAG, "onAppWidgetOptionsChanged for widget $appWidgetId")
+        enqueueOneTimeUpdate(context)
     }
 
     override fun onReceive(context: Context, intent: Intent) {

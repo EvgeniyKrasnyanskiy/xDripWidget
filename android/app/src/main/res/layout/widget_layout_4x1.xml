@@ -6,70 +6,88 @@
     android:background="@drawable/widget_background"
     android:clipToOutline="true"
     android:orientation="vertical"
-    android:padding="5dp">
+    android:padding="6dp">
 
-    <!-- Row 1: Delta (left), Glucose (right) -->
+    <!-- Top Block: Glucose, Delta, Battery, Time -->
     <LinearLayout
+        android:id="@+id/top_block"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <!-- Row 1: Delta (left), Glucose (right) -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/tv_delta"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:gravity="start|center_vertical"
+                android:includeFontPadding="false"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:text="Δ +0.0"
+                android:textColor="#bdc3c7"
+                android:textSize="12sp" />
+
+            <TextView
+                android:id="@+id/tv_glucose"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:gravity="end|center_vertical"
+                android:includeFontPadding="false"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:text="5.5 →"
+                android:textColor="#27ae60"
+                android:textSize="20sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <!-- Row 2: Battery Bar (left), Time (right) -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:layout_marginTop="2dp">
+
+            <ImageView
+                android:id="@+id/iv_battery"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center_vertical"
+                android:contentDescription="Battery" />
+
+            <TextView
+                android:id="@+id/tv_time"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:gravity="end|center_vertical"
+                android:includeFontPadding="false"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:text="0 мин"
+                android:textColor="#7f8c8d"
+                android:textSize="10sp" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- Bottom Block: 4-Hour Sparkline Graph (adaptive on vertical resize) -->
+    <ImageView
+        android:id="@+id/iv_sparkline"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
-        android:gravity="center_vertical"
-        android:orientation="horizontal">
-
-        <TextView
-            android:id="@+id/tv_delta"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:gravity="start|center_vertical"
-            android:includeFontPadding="false"
-            android:maxLines="1"
-            android:singleLine="true"
-            android:text="Δ +0.0"
-            android:textColor="#bdc3c7"
-            android:textSize="12sp" />
-
-        <TextView
-            android:id="@+id/tv_glucose"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:gravity="end|center_vertical"
-            android:includeFontPadding="false"
-            android:maxLines="1"
-            android:singleLine="true"
-            android:text="5.5 →"
-            android:textColor="#27ae60"
-            android:textSize="20sp"
-            android:textStyle="bold" />
-    </LinearLayout>
-
-    <!-- Row 2: Battery Bar (left), Time (right) -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:gravity="center_vertical"
-        android:orientation="horizontal">
-
-        <ImageView
-            android:id="@+id/iv_battery"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_gravity="center_vertical"
-            android:contentDescription="Battery" />
-
-        <TextView
-            android:id="@+id/tv_time"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:gravity="end|center_vertical"
-            android:includeFontPadding="false"
-            android:maxLines="1"
-            android:singleLine="true"
-            android:text="0м"
-            android:textColor="#7f8c8d"
-            android:textSize="10sp" />
-    </LinearLayout>
+        android:layout_marginTop="4dp"
+        android:scaleType="fitXY"
+        android:visibility="gone"
+        android:contentDescription="Glucose 4-hour trend graph" />
 
 </LinearLayout>

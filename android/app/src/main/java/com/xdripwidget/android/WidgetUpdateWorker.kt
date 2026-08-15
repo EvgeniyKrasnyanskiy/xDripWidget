@@ -8,13 +8,17 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.DashPathEffect
 import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.util.Log
+import android.util.TypedValue
+import android.view.View
 import android.widget.RemoteViews
 import androidx.work.Worker
 import androidx.work.WorkerParameters
+import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
@@ -30,59 +34,104 @@ class WidgetUpdateWorker(
         val serverUrl = WidgetPreferences.getServerUrl(context)
         val apiSecret = WidgetPreferences.getApiSecret(context)
 
+        var currentJson: JSONObject? = null
+        val historyList = mutableListOf<JSONObject>()
+
         try {
-            var endpoint = "$serverUrl/api/v1/current"
+            // 1. Fetch /api/v1/current
+            var currEndpoint = "$serverUrl/api/v1/current"
             if (apiSecret.isNotEmpty()) {
-                endpoint += "?token=$apiSecret"
+                currEndpoint += "?token=$apiSecret"
             }
 
-            val url = URL(endpoint)
-            val connection = url.openConnection() as HttpURLConnection
-            connection.requestMethod = "GET"
-            connection.connectTimeout = 8000
-            connection.readTimeout = 8000
-            connection.setRequestProperty("Accept", "application/json")
+            val currUrl = URL(currEndpoint)
+            val currConn = currUrl.openConnection() as HttpURLConnection
+            currConn.requestMethod = "GET"
+            currConn.connectTimeout = 8000
+            currConn.readTimeout = 8000
+            currConn.setRequestProperty("Accept", "application/json")
             if (apiSecret.isNotEmpty()) {
-                connection.setRequestProperty("api-secret", apiSecret)
+                currConn.setRequestProperty("api-secret", apiSecret)
             }
 
-            val responseCode = connection.responseCode
+            val responseCode = currConn.responseCode
             if (responseCode == 200) {
-                val stream = connection.inputStream
+                val stream = currConn.inputStream
                 val jsonText = stream.bufferedReader().use { it.readText() }
-                connection.disconnect()
-
-                val json = JSONObject(jsonText)
-                updateWidgetViews(json, null)
-                return Result.success()
+                currConn.disconnect()
+                currentJson = JSONObject(jsonText)
             } else if (responseCode == 204) {
-                updateWidgetViews(null, "Нет данных")
+                currConn.disconnect()
+                updateWidgetViews(null, emptyList(), "Нет данных")
                 return Result.success()
             } else {
-                updateWidgetViews(null, "HTTP $responseCode")
+                currConn.disconnect()
+                updateWidgetViews(null, emptyList(), "HTTP $responseCode")
                 return Result.retry()
             }
+
+            // 2. Fetch /api/v1/history?hours=4
+            try {
+                var histEndpoint = "$serverUrl/api/v1/history?hours=4"
+                if (apiSecret.isNotEmpty()) {
+                    histEndpoint += "&token=$apiSecret"
+                }
+                val histUrl = URL(histEndpoint)
+                val histConn = histUrl.openConnection() as HttpURLConnection
+                histConn.requestMethod = "GET"
+                histConn.connectTimeout = 6000
+                histConn.readTimeout = 6000
+                histConn.setRequestProperty("Accept", "application/json")
+                if (apiSecret.isNotEmpty()) {
+                    histConn.setRequestProperty("api-secret", apiSecret)
+                }
+
+                if (histConn.responseCode == 200) {
+                    val histText = histConn.inputStream.bufferedReader().use { it.readText() }
+                    val array = JSONArray(histText)
+                    for (i in 0 until array.length()) {
+                        historyList.add(array.getJSONObject(i))
+                    }
+                }
+                histConn.disconnect()
+            } catch (eHist: Exception) {
+                Log.w(TAG, "History fetch failed: ${eHist.message}")
+            }
+
+            updateWidgetViews(currentJson, historyList, null)
+            return Result.success()
+
         } catch (e: Exception) {
             Log.e(TAG, "Fetch error: ${e.message}", e)
-            updateWidgetViews(null, "Ошибка сети")
+            updateWidgetViews(null, emptyList(), "Ошибка сети")
             return Result.retry()
         }
     }
 
-    private fun updateWidgetViews(json: JSONObject?, errorMsg: String?) {
+    private fun updateWidgetViews(
+        json: JSONObject?,
+        historyList: List<JSONObject>,
+        errorMsg: String?
+    ) {
         val appWidgetManager = AppWidgetManager.getInstance(context)
         val componentName = ComponentName(context, xDripWidgetProvider::class.java)
         val appWidgetIds = appWidgetManager.getAppWidgetIds(componentName)
 
         for (appWidgetId in appWidgetIds) {
             val views = RemoteViews(context.packageName, R.layout.widget_layout_4x1)
+            val options = appWidgetManager.getAppWidgetOptions(appWidgetId)
+            val minWidth = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 150)
+            val minHeight = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 50)
+
+            val showGraph = minHeight >= 90 && historyList.size >= 2
 
             if (errorMsg != null || json == null) {
                 views.setTextViewText(R.id.tv_glucose, "--.-")
                 views.setTextViewText(R.id.tv_delta, errorMsg ?: "Ошибка")
                 views.setTextViewText(R.id.tv_time, "")
-                val emptyBat = createBatteryBitmap(-1, true)
+                val emptyBat = createBatteryBitmap(-1, true, 1.0f)
                 views.setImageViewBitmap(R.id.iv_battery, emptyBat)
+                views.setViewVisibility(R.id.iv_sparkline, View.GONE)
             } else {
                 val mmol = json.optDouble("mmol", 0.0)
                 val direction = json.optString("direction", "Unknown")
@@ -92,6 +141,43 @@ class WidgetUpdateWorker(
 
                 val arrow = trendArrows[direction] ?: "?"
                 val stale = minutesAgo > 5
+
+                // Responsive typography & scaling
+                val glucoseSizeSp: Float
+                val deltaSizeSp: Float
+                val timeSizeSp: Float
+                val batteryScale: Float
+
+                if (showGraph) {
+                    glucoseSizeSp = 28f
+                    deltaSizeSp = 13f
+                    timeSizeSp = 11f
+                    batteryScale = 1.2f
+
+                    // Draw 4-Hour Sparkline Graph
+                    val graphHeightDp = (minHeight - 48).coerceIn(45, 400)
+                    val graphWidthDp = minWidth.coerceAtLeast(140)
+                    val sparklineBitmap = createSparklineBitmap(historyList, graphWidthDp, graphHeightDp)
+                    views.setImageViewBitmap(R.id.iv_sparkline, sparklineBitmap)
+                    views.setViewVisibility(R.id.iv_sparkline, View.VISIBLE)
+                } else {
+                    views.setViewVisibility(R.id.iv_sparkline, View.GONE)
+                    if (minWidth >= 220) {
+                        glucoseSizeSp = 26f
+                        deltaSizeSp = 13f
+                        timeSizeSp = 11f
+                        batteryScale = 1.15f
+                    } else {
+                        glucoseSizeSp = 20f
+                        deltaSizeSp = 12f
+                        timeSizeSp = 10f
+                        batteryScale = 1.0f
+                    }
+                }
+
+                views.setTextViewTextSize(R.id.tv_glucose, TypedValue.COMPLEX_UNIT_SP, glucoseSizeSp)
+                views.setTextViewTextSize(R.id.tv_delta, TypedValue.COMPLEX_UNIT_SP, deltaSizeSp)
+                views.setTextViewTextSize(R.id.tv_time, TypedValue.COMPLEX_UNIT_SP, timeSizeSp)
 
                 // Glucose text & color
                 val colorHex = getGlucoseColorHex(mmol, stale)
@@ -106,8 +192,8 @@ class WidgetUpdateWorker(
                 val timeStr = formatTimeAgo(minutesAgo)
                 views.setTextViewText(R.id.tv_time, timeStr)
 
-                // Battery Bar Bitmap (scaled 1.5x smaller on both sides)
-                val batBitmap = createBatteryBitmap(battery, stale)
+                // Battery Bar Bitmap
+                val batBitmap = createBatteryBitmap(battery, stale, batteryScale)
                 views.setImageViewBitmap(R.id.iv_battery, batBitmap)
 
                 // Check 3-cycle alarms
@@ -146,13 +232,11 @@ class WidgetUpdateWorker(
         val isHigh = mmol > highThreshold
 
         if (!isLow && !isHigh) {
-            // Normal range: reset alarm cycle counter and snooze state
             WidgetPreferences.resetAlarmState(context)
             SoundGenerator.stopMelody()
             return
         }
 
-        // Check if currently snoozed by user tap or auto-snooze
         val snoozedUntil = WidgetPreferences.getSnoozedUntil(context)
         if (now < snoozedUntil) {
             Log.d(TAG, "Alarm is snoozed until $snoozedUntil")
@@ -166,7 +250,6 @@ class WidgetUpdateWorker(
         val cycleCount = WidgetPreferences.getAlarmCycleCount(context)
         val lastCycleTime = WidgetPreferences.getLastCycleTime(context)
 
-        // 1-minute interval between 1-minute alarm cycles
         if (now - lastCycleTime >= 60_000L) {
             if (cycleCount < 3) {
                 val newCount = cycleCount + 1
@@ -184,7 +267,6 @@ class WidgetUpdateWorker(
                 Log.d(TAG, "Triggering alarm cycle $newCount/3 for mmol=$mmol")
                 SoundGenerator.playAlarmCycleAsync(melody, volume, 60_000L)
             } else {
-                // 3 cycles finished without user tap -> auto-snooze for 30m / 60m!
                 Log.d(TAG, "Completed 3 alarm cycles without user tap. Auto-snoozing for $snoozeMs ms.")
                 SoundGenerator.stopMelody()
                 WidgetPreferences.setSnoozedUntil(context, now + snoozeMs)
@@ -195,11 +277,11 @@ class WidgetUpdateWorker(
 
     private fun getGlucoseColorHex(mmol: Double, stale: Boolean): String {
         if (stale) return "#7f8c8d"
-        if (mmol <= 3.3) return "#e74c3c" // Heavy Hypo (Red)
-        if (mmol < 3.9) return "#f39c12"  // Mild Hypo (Yellow)
-        if (mmol <= 7.8) return "#27ae60" // Target Normal (Green)
-        if (mmol < 10.0) return "#f39c12" // Mild Hyper (Yellow)
-        return "#e57373"                  // Soft Red (Hyper >= 10.0)
+        if (mmol <= 3.3) return "#e74c3c"
+        if (mmol < 3.9) return "#f39c12"
+        if (mmol <= 7.8) return "#27ae60"
+        if (mmol < 10.0) return "#f39c12"
+        return "#e57373"
     }
 
     private fun formatTimeAgo(minutesAgo: Int): String {
@@ -210,10 +292,10 @@ class WidgetUpdateWorker(
         }
     }
 
-    private fun createBatteryBitmap(pct: Int, stale: Boolean): Bitmap {
+    private fun createBatteryBitmap(pct: Int, stale: Boolean, scale: Float = 1.0f): Bitmap {
         val density = context.resources.displayMetrics.density.coerceAtLeast(1.0f)
-        val targetWidthDp = 50f
-        val targetHeightDp = 14f
+        val targetWidthDp = 50f * scale
+        val targetHeightDp = 14f * scale
         val width = (targetWidthDp * density).toInt().coerceAtLeast(40)
         val height = (targetHeightDp * density).toInt().coerceAtLeast(12)
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
@@ -258,6 +340,129 @@ class WidgetUpdateWorker(
         paint.textSize = 17f
         paint.typeface = Typeface.DEFAULT_BOLD
         canvas.drawText("$pct%", 52f, 18.5f, paint)
+
+        return bitmap
+    }
+
+    private fun createSparklineBitmap(
+        history: List<JSONObject>,
+        widthDp: Int,
+        heightDp: Int
+    ): Bitmap {
+        val density = context.resources.displayMetrics.density.coerceAtLeast(1.0f)
+        val w = (widthDp * density).toInt().coerceAtLeast(140)
+        val h = (heightDp * density).toInt().coerceAtLeast(45)
+
+        val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+
+        if (history.size < 2) return bitmap
+
+        val gx = 6f * density
+        val gy = 4f * density
+        val gw = w - 12f * density
+        val gh = h - 20f * density
+
+        var minVal = 2.5
+        var maxVal = 14.0
+        for (item in history) {
+            val v = item.optDouble("mmol", 5.5)
+            if (v < minVal) minVal = (v - 0.5).coerceAtLeast(1.5)
+            if (v > maxVal) maxVal = (v + 1.0).coerceAtMost(22.0)
+        }
+        val valRange = (maxVal - minVal).coerceAtLeast(0.1)
+
+        fun valToY(v: Double): Float {
+            val ratio = (v - minVal) / valRange
+            return (gy + gh - (ratio * gh)).toFloat()
+        }
+
+        val yLo = valToY(3.9)
+        val yHi = valToY(7.8)
+
+        // Target corridor (TIR 3.9 - 7.8)
+        val topCorridor = yHi.coerceIn(gy, gy + gh)
+        val botCorridor = yLo.coerceIn(gy, gy + gh)
+        if (botCorridor > topCorridor) {
+            val corridorPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                style = Paint.Style.FILL
+                color = Color.argb(35, 39, 174, 96)
+            }
+            canvas.drawRect(gx, topCorridor, gx + gw, botCorridor, corridorPaint)
+        }
+
+        // Dashed lines for 3.9 and 7.8
+        val dashPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = 1f * density
+            color = Color.argb(90, 39, 174, 96)
+            pathEffect = DashPathEffect(floatArrayOf(5f * density, 5f * density), 0f)
+        }
+        if (yLo in gy..(gy + gh)) {
+            canvas.drawLine(gx, yLo, gx + gw, yLo, dashPaint)
+        }
+        if (yHi in gy..(gy + gh)) {
+            canvas.drawLine(gx, yHi, gx + gw, yHi, dashPaint)
+        }
+
+        // Timeline points
+        val tStart = history.first().optLong("timestamp", 0L)
+        val tEnd = history.last().optLong("timestamp", tStart)
+        val tSpan = (tEnd - tStart).coerceAtLeast(1L).toDouble()
+
+        val points = mutableListOf<Triple<Float, Float, Int>>()
+        for (item in history) {
+            val ts = item.optLong("timestamp", tStart)
+            val v = item.optDouble("mmol", 5.5)
+            val px = (gx + ((ts - tStart) / tSpan * gw)).toFloat()
+            val py = valToY(v)
+            val dotColor = Color.parseColor(getGlucoseColorHex(v, false))
+            points.add(Triple(px, py, dotColor))
+        }
+
+        // Line connecting points
+        val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = 1.5f * density
+            color = Color.argb(80, 200, 200, 200)
+        }
+        for (i in 0 until points.size - 1) {
+            val p1 = points[i]
+            val p2 = points[i + 1]
+            canvas.drawLine(p1.first, p1.second, p2.first, p2.second, linePaint)
+        }
+
+        // Point dots
+        val dotPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.FILL
+        }
+        for (p in points) {
+            dotPaint.color = p.third
+            canvas.drawCircle(p.first, p.second, 2.5f * density, dotPaint)
+        }
+
+        // Axis line
+        val axisY = gy + gh + 3f * density
+        val axisPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = 1f * density
+            color = Color.argb(40, 255, 255, 255)
+        }
+        canvas.drawLine(gx, axisY, gx + gw, axisY, axisPaint)
+
+        // Axis labels
+        val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.argb(160, 180, 180, 180)
+            textSize = 9f * density
+        }
+        canvas.drawText("-4ч", gx, axisY + 11f * density, textPaint)
+        val midX = gx + gw / 2f
+        val midText = "-2ч"
+        val midW = textPaint.measureText(midText)
+        canvas.drawText(midText, midX - (midW / 2f), axisY + 11f * density, textPaint)
+        val nowText = "сейчас"
+        val nowW = textPaint.measureText(nowText)
+        canvas.drawText(nowText, gx + gw - nowW, axisY + 11f * density, textPaint)
 
         return bitmap
     }
