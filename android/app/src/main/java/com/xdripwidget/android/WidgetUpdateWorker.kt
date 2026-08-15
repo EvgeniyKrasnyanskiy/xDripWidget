@@ -204,22 +204,24 @@ class WidgetUpdateWorker(
 
     private fun formatTimeAgo(minutesAgo: Int): String {
         return when {
-            minutesAgo < 60 -> "$minutesAgo м назад"
-            minutesAgo < 1440 -> "${minutesAgo / 60} ч назад"
-            else -> "${minutesAgo / 1440} д назад"
+            minutesAgo < 60 -> "$minutesAgo мин"
+            minutesAgo < 1440 -> "${minutesAgo / 60} ч"
+            else -> "${minutesAgo / 1440} д"
         }
     }
 
     private fun createBatteryBitmap(pct: Int, stale: Boolean): Bitmap {
         val density = context.resources.displayMetrics.density.coerceAtLeast(1.0f)
-        val width = (93 * density).toInt().coerceAtLeast(93)
-        val height = (22 * density).toInt().coerceAtLeast(22)
+        val targetWidthDp = 50f
+        val targetHeightDp = 14f
+        val width = (targetWidthDp * density).toInt().coerceAtLeast(40)
+        val height = (targetHeightDp * density).toInt().coerceAtLeast(12)
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
 
         if (pct < 0) return bitmap
 
-        canvas.scale(width / 140f, height / 34f)
+        canvas.scale(width / 90f, height / 26f)
 
         val paint = Paint(Paint.ANTI_ALIAS_FLAG)
 
@@ -231,21 +233,21 @@ class WidgetUpdateWorker(
         }
 
         // Frame
-        val frameRect = RectF(2f, 4f, 64f, 30f)
+        val frameRect = RectF(1.5f, 3f, 44f, 23f)
         paint.style = Paint.Style.STROKE
-        paint.strokeWidth = 2.5f
+        paint.strokeWidth = 2.2f
         paint.color = Color.parseColor("#bdc3c7")
-        canvas.drawRoundRect(frameRect, 4.5f, 4.5f, paint)
+        canvas.drawRoundRect(frameRect, 3.5f, 3.5f, paint)
 
         // Tip
-        val tipRect = RectF(64f, 10f, 68f, 24f)
+        val tipRect = RectF(44f, 8f, 47.5f, 18f)
         paint.style = Paint.Style.FILL
-        canvas.drawRoundRect(tipRect, 2f, 2f, paint)
+        canvas.drawRoundRect(tipRect, 1.5f, 1.5f, paint)
 
         // Fill
         if (pct > 0) {
-            val fillWidth = (56f * (pct.coerceIn(0, 100) / 100f))
-            val fillRect = RectF(4.5f, 6.5f, 4.5f + fillWidth, 27.5f)
+            val fillWidth = 37f * (pct.coerceIn(0, 100) / 100f)
+            val fillRect = RectF(3.5f, 5f, 3.5f + fillWidth, 21f)
             paint.color = bColor
             canvas.drawRect(fillRect, paint)
         }
@@ -255,7 +257,7 @@ class WidgetUpdateWorker(
         paint.color = Color.parseColor("#bdc3c7")
         paint.textSize = 17f
         paint.typeface = Typeface.DEFAULT_BOLD
-        canvas.drawText("$pct%", 75f, 23.5f, paint)
+        canvas.drawText("$pct%", 52f, 18.5f, paint)
 
         return bitmap
     }

@@ -6,7 +6,7 @@
     android:background="@drawable/widget_background"
     android:clipToOutline="true"
     android:orientation="vertical"
-    android:padding="6dp">
+    android:padding="5dp">
 
     <!-- Row 1: Delta (left), Glucose (right) -->
     <LinearLayout
@@ -23,9 +23,11 @@
             android:layout_weight="1"
             android:gravity="start|center_vertical"
             android:includeFontPadding="false"
+            android:maxLines="1"
+            android:singleLine="true"
             android:text="Δ +0.0"
             android:textColor="#bdc3c7"
-            android:textSize="13sp" />
+            android:textSize="12sp" />
 
         <TextView
             android:id="@+id/tv_glucose"
@@ -33,9 +35,11 @@
             android:layout_height="wrap_content"
             android:gravity="end|center_vertical"
             android:includeFontPadding="false"
+            android:maxLines="1"
+            android:singleLine="true"
             android:text="5.5 →"
             android:textColor="#27ae60"
-            android:textSize="22sp"
+            android:textSize="20sp"
             android:textStyle="bold" />
     </LinearLayout>
 
@@ -51,6 +55,7 @@
             android:id="@+id/iv_battery"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:layout_gravity="center_vertical"
             android:contentDescription="Battery" />
 
         <TextView
@@ -60,7 +65,9 @@
             android:layout_weight="1"
             android:gravity="end|center_vertical"
             android:includeFontPadding="false"
-            android:text="0 м назад"
+            android:maxLines="1"
+            android:singleLine="true"
+            android:text="0м"
             android:textColor="#7f8c8d"
             android:textSize="10sp" />
     </LinearLayout>
