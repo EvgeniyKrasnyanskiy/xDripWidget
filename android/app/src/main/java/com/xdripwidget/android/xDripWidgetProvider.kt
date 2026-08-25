@@ -28,7 +28,6 @@ class xDripWidgetProvider : AppWidgetProvider() {
         Log.d(TAG, "onUpdate triggered for ${appWidgetIds.size} widgets")
         enqueueOneTimeUpdate(context)
         scheduleExactAlarm(context)
-        schedulePeriodicWorkBackup(context)
     }
 
     override fun onAppWidgetOptionsChanged(

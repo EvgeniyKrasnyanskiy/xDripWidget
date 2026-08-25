@@ -66,8 +66,8 @@ class WidgetUpdateWorker(
                 return Result.success()
             } else {
                 currConn.disconnect()
-                updateWidgetViews(null, emptyList(), "HTTP $responseCode")
-                return Result.retry()
+                showErrorOnWidget("HTTP $responseCode")
+                return Result.failure()
             }
 
             // 2. Fetch /api/v1/history?hours=4
@@ -103,8 +103,28 @@ class WidgetUpdateWorker(
 
         } catch (e: Exception) {
             Log.e(TAG, "Fetch error: ${e.message}", e)
-            updateWidgetViews(null, emptyList(), "Ошибка сети")
-            return Result.retry()
+            showErrorOnWidget("Ошибка сети")
+            return Result.failure()
+        }
+    }
+
+    /**
+     * Show error message only in tv_time, preserving existing glucose data on widget.
+     * Used on network/HTTP errors to avoid overwriting valid data with "--.-".
+     */
+    private fun showErrorOnWidget(errorMsg: String) {
+        try {
+            val appWidgetManager = AppWidgetManager.getInstance(context)
+            val componentName = ComponentName(context, xDripWidgetProvider::class.java)
+            val appWidgetIds = appWidgetManager.getAppWidgetIds(componentName)
+
+            for (appWidgetId in appWidgetIds) {
+                val views = RemoteViews(context.packageName, R.layout.widget_layout_4x1)
+                views.setTextViewText(R.id.tv_time, "⚠ $errorMsg")
+                appWidgetManager.partiallyUpdateAppWidget(appWidgetId, views)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error showing error on widget: ${e.message}")
         }
     }
 
