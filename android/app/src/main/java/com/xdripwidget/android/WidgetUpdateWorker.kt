@@ -110,6 +110,7 @@ class WidgetUpdateWorker(
 
     /**
      * Show error message only in tv_time, preserving existing glucose data on widget.
+     * Makes glucose & delta text gray to indicate stale/unreliable data.
      * Used on network/HTTP errors to avoid overwriting valid data with "--.-".
      */
     private fun showErrorOnWidget(errorMsg: String) {
@@ -118,9 +119,12 @@ class WidgetUpdateWorker(
             val componentName = ComponentName(context, xDripWidgetProvider::class.java)
             val appWidgetIds = appWidgetManager.getAppWidgetIds(componentName)
 
+            val staleColor = Color.parseColor("#7f8c8d")
             for (appWidgetId in appWidgetIds) {
                 val views = RemoteViews(context.packageName, R.layout.widget_layout_4x1)
                 views.setTextViewText(R.id.tv_time, "⚠ $errorMsg")
+                views.setTextColor(R.id.tv_glucose, staleColor)
+                views.setTextColor(R.id.tv_delta, staleColor)
                 appWidgetManager.partiallyUpdateAppWidget(appWidgetId, views)
             }
         } catch (e: Exception) {
