@@ -1,8 +1,7 @@
 using System;
-using System.Collections.Generic;
 using System.Globalization;
 using System.Windows;
-using System.Windows.Controls;
+using System.Windows.Input;
 
 namespace XDripWidget
 {
@@ -12,15 +11,6 @@ namespace XDripWidget
         private readonly string _baseUrl;
         private readonly string _apiSecret;
 
-        private readonly Dictionary<string, string> _eventMap = new Dictionary<string, string>
-        {
-            { "Приём пищи (Углеводы + Инсулин)", "Meal Bolus" },
-            { "Коррекция инсулином",             "Correction Bolus" },
-            { "Перекус / Углеводы",              "Carb Intake" },
-            { "Замер сахара крови",              "BG Check" },
-            { "Заметка",                         "Note" }
-        };
-
         public TreatmentDialog(ApiClient apiClient, string baseUrl, string apiSecret)
         {
             InitializeComponent();
@@ -28,44 +18,56 @@ namespace XDripWidget
             _baseUrl = baseUrl;
             _apiSecret = apiSecret;
 
-            foreach (var item in _eventMap.Keys)
-            {
-                CmbEventType.Items.Add(item);
-            }
-            CmbEventType.SelectedIndex = 0;
-
             TxtDateTime.Text = DateTime.Now.ToString("yyyy-MM-dd HH:mm");
-        }
 
-        private void CmbEventType_SelectionChanged(object sender, SelectionChangedEventArgs e)
-        {
-            string sel = CmbEventType.SelectedItem as string;
-            if (string.IsNullOrEmpty(sel)) return;
+            Loaded += (s, e) =>
+            {
+                TxtInsulin.Focus();
+            };
 
-            string ev;
-            if (!_eventMap.TryGetValue(sel, out ev)) ev = "Meal Bolus";
-
-            // Dim/focus appropriate fields
-            TxtInsulin.IsEnabled = (ev == "Meal Bolus" || ev == "Correction Bolus");
-            TxtCarbs.IsEnabled = (ev == "Meal Bolus" || ev == "Carb Intake");
-            TxtGlucose.IsEnabled = (ev == "BG Check");
-            TxtNotes.IsEnabled = true;
-
-            TxtInsulin.Opacity = TxtInsulin.IsEnabled ? 1.0 : 0.4;
-            TxtCarbs.Opacity = TxtCarbs.IsEnabled ? 1.0 : 0.4;
-            TxtGlucose.Opacity = TxtGlucose.IsEnabled ? 1.0 : 0.4;
+            KeyDown += (s, e) =>
+            {
+                if (e.Key == Key.Enter && !TxtNotes.IsFocused)
+                {
+                    BtnSubmit_Click(this, new RoutedEventArgs());
+                }
+                else if (e.Key == Key.Escape)
+                {
+                    Close();
+                }
+            };
         }
 
         private async void BtnSubmit_Click(object sender, RoutedEventArgs e)
         {
-            string sel = CmbEventType.SelectedItem as string;
-            string eventType = "Meal Bolus";
-            if (!string.IsNullOrEmpty(sel)) _eventMap.TryGetValue(sel, out eventType);
-
             double insulin = ParseDouble(TxtInsulin.Text);
             double carbs = ParseDouble(TxtCarbs.Text);
-            double glucose = ParseDouble(TxtGlucose.Text);
             string notes = TxtNotes.Text.Trim();
+
+            if (insulin <= 0 && carbs <= 0 && string.IsNullOrEmpty(notes))
+            {
+                MessageBox.Show("Введите количество инсулина, углеводов или заметку.", "xDripWidget", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            // Automatic event type determination
+            string eventType;
+            if (carbs > 0 && insulin > 0)
+            {
+                eventType = "Meal Bolus";
+            }
+            else if (carbs > 0)
+            {
+                eventType = "Carb Intake";
+            }
+            else if (insulin > 0)
+            {
+                eventType = "Correction Bolus";
+            }
+            else
+            {
+                eventType = "Note";
+            }
 
             DateTime dt;
             if (!DateTime.TryParse(TxtDateTime.Text, out dt))
@@ -76,10 +78,9 @@ namespace XDripWidget
             IsEnabled = false;
             try
             {
-                bool success = await _apiClient.SubmitTreatmentAsync(_baseUrl, _apiSecret, eventType, carbs, insulin, glucose, notes, dt);
+                bool success = await _apiClient.SubmitTreatmentAsync(_baseUrl, _apiSecret, eventType, carbs, insulin, 0.0, notes, dt);
                 if (success)
                 {
-                    MessageBox.Show("Терапия успешно отправлена на сервер!", "Успешно", MessageBoxButton.OK, MessageBoxImage.Information);
                     DialogResult = true;
                     Close();
                 }

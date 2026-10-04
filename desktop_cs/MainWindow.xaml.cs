@@ -71,8 +71,7 @@ namespace XDripWidget
             var contextMenu = new Forms.ContextMenu();
             contextMenu.MenuItems.Add("Показать / Скрыть", (s, e) => ToggleVisibility());
             contextMenu.MenuItems.Add("Обновить сейчас", (s, e) => FetchDataAsync());
-            contextMenu.MenuItems.Add("-");
-            contextMenu.MenuItems.Add("Выход", (s, e) => Close());
+            contextMenu.MenuItems.Add("Выход", (s, e) => Dispatcher.Invoke((Action)ConfirmAndQuit));
             _notifyIcon.ContextMenu = contextMenu;
 
             _notifyIcon.MouseClick += (s, e) =>
@@ -278,11 +277,46 @@ namespace XDripWidget
 
         private void MenuExit_Click(object sender, RoutedEventArgs e)
         {
-            Close();
+            ConfirmAndQuit();
+        }
+
+        private bool _isConfirmedQuit = false;
+
+        private void ConfirmAndQuit()
+        {
+            var res = MessageBox.Show(
+                "Вы действительно хотите выйти из xDrip Widget?",
+                "Выход из программы",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question,
+                MessageBoxResult.No
+            );
+            if (res == MessageBoxResult.Yes)
+            {
+                _isConfirmedQuit = true;
+                Close();
+            }
         }
 
         private void Window_Closing(object sender, System.ComponentModel.CancelEventArgs e)
         {
+            if (!_isConfirmedQuit)
+            {
+                var res = MessageBox.Show(
+                    "Вы действительно хотите выйти из xDrip Widget?",
+                    "Выход из программы",
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Question,
+                    MessageBoxResult.No
+                );
+                if (res != MessageBoxResult.Yes)
+                {
+                    e.Cancel = true;
+                    return;
+                }
+                _isConfirmedQuit = true;
+            }
+
             if (_notifyIcon != null)
             {
                 _notifyIcon.Visible = false;
