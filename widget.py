@@ -472,14 +472,14 @@ class AsymmetricDoubleSpinBox(QDoubleSpinBox):
 
 
 # ---------------------------------------------------------------------------
-# Treatments dialog (Insulin, Carbs, Blood Glucose input + datetime)
+# ---------------------------------------------------------------------------
+# Treatments dialog (Insulin, Carbs, Notes input + datetime)
 # ---------------------------------------------------------------------------
 class TreatmentDialog(QDialog):
     def __init__(self, base_url: str, api_secret: str = "", parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Ввод данных терапии")
+        self.setWindowTitle("Ввод терапии")
         self.setModal(True)
-        self.resize(420, 360)
         self._base_url = base_url
         self._api_secret = api_secret
 
@@ -490,32 +490,24 @@ class TreatmentDialog(QDialog):
                 font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
             }
             QLabel {
-                font-size: 13px;
-                color: #94A3B8;
+                font-size: 14px;
+                font-weight: 600;
             }
-            QComboBox, QDateTimeEdit {
+            QDateTimeEdit {
                 background-color: #1E293B;
-                color: #F8FAFC;
+                color: #CBD5E1;
                 border: 1px solid #334155;
                 border-radius: 6px;
-                padding: 5px 8px;
+                padding: 6px 10px;
                 font-size: 13px;
                 selection-background-color: #0284C7;
             }
-            QComboBox:focus, QDateTimeEdit:focus {
+            QDateTimeEdit:focus {
                 border: 1px solid #0284C7;
             }
-            QComboBox::drop-down, QDateTimeEdit::drop-down {
+            QDateTimeEdit::drop-down {
                 border: none;
                 width: 22px;
-            }
-            QComboBox QAbstractItemView {
-                background-color: #1E293B;
-                color: #F8FAFC;
-                selection-background-color: #0284C7;
-                selection-color: #FFFFFF;
-                border: 1px solid #334155;
-                outline: none;
             }
             QCalendarWidget QWidget {
                 background-color: #1E293B;
@@ -524,39 +516,93 @@ class TreatmentDialog(QDialog):
         """)
 
         # --- Labels ---
-        self._lbl_event = QLabel("Тип события:")
-        self._lbl_glucose = QLabel("Глюкоза крови:")
-        self._lbl_carbs = QLabel("Углеводы:")
-        self._lbl_insulin = QLabel("Инсулин:")
-        self._lbl_datetime = QLabel("Дата/Время:")
+        self._lbl_insulin = QLabel("Инсулин (ЕД):")
+        self._lbl_insulin.setStyleSheet("color: #38BDF8; font-weight: bold; font-size: 14px;")
+
+        self._lbl_carbs = QLabel("Углеводы (г):")
+        self._lbl_carbs.setStyleSheet("color: #FBBF24; font-weight: bold; font-size: 14px;")
+
         self._lbl_notes = QLabel("Заметка:")
+        self._lbl_notes.setStyleSheet("color: #C084FC; font-weight: bold; font-size: 14px;")
 
-        # --- Glucose BG (optional) ---
-        self._glucose_spin = QDoubleSpinBox()
-        self._glucose_spin.setRange(0, 30.0)
-        self._glucose_spin.setDecimals(1)
-        self._glucose_spin.setSuffix(" ммоль/л")
-        self._glucose_spin.setSpecialValueText("Не указано")
+        self._lbl_datetime = QLabel("Время:")
+        self._lbl_datetime.setStyleSheet("color: #94A3B8; font-size: 13px;")
 
-        # --- Carbs (step up +1.0g, step down -0.5g) ---
-        self._carbs_spin = AsymmetricDoubleSpinBox(step_up=1.0, step_down=0.5)
-        self._carbs_spin.setRange(0, 500)
-        self._carbs_spin.setDecimals(1)
-        self._carbs_spin.setSuffix(" г")
-
-        # --- Insulin (step up +0.1U, step down -0.05U) ---
+        # --- Insulin (Action Blue #0284C7) ---
         self._insulin_spin = AsymmetricDoubleSpinBox(step_up=0.1, step_down=0.05)
         self._insulin_spin.setRange(0, 100)
         self._insulin_spin.setDecimals(2)
         self._insulin_spin.setSuffix(" ЕД")
+        self._insulin_spin.setStyleSheet("""
+            QDoubleSpinBox {
+                background-color: #1E293B;
+                color: #FFFFFF;
+                border: 2px solid #0284C7;
+                border-radius: 6px;
+                padding: 6px 10px;
+                font-size: 15px;
+                font-weight: bold;
+            }
+            QDoubleSpinBox:focus {
+                border: 2px solid #38BDF8;
+                background-color: #0B0F17;
+            }
+            QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {
+                background-color: #0284C7;
+                width: 20px;
+                border: none;
+            }
+            QDoubleSpinBox::up-button:hover, QDoubleSpinBox::down-button:hover {
+                background-color: #0369A1;
+            }
+        """)
 
-        # --- Event type ---
-        self._event_type_combo = QComboBox()
-        self._event_type_combo.addItems(list(EVENT_TYPES_MAP.keys()))
+        # --- Carbs (Amber #F59E0B) ---
+        self._carbs_spin = AsymmetricDoubleSpinBox(step_up=1.0, step_down=0.5)
+        self._carbs_spin.setRange(0, 500)
+        self._carbs_spin.setDecimals(1)
+        self._carbs_spin.setSuffix(" г")
+        self._carbs_spin.setStyleSheet("""
+            QDoubleSpinBox {
+                background-color: #1E293B;
+                color: #FFFFFF;
+                border: 2px solid #F59E0B;
+                border-radius: 6px;
+                padding: 6px 10px;
+                font-size: 15px;
+                font-weight: bold;
+            }
+            QDoubleSpinBox:focus {
+                border: 2px solid #FBBF24;
+                background-color: #0B0F17;
+            }
+            QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {
+                background-color: #F59E0B;
+                width: 20px;
+                border: none;
+            }
+            QDoubleSpinBox::up-button:hover, QDoubleSpinBox::down-button:hover {
+                background-color: #D97706;
+            }
+        """)
 
-        # --- Notes ---
+        # --- Notes (Purple #8B5CF6) ---
         self._notes_edit = QLineEdit()
         self._notes_edit.setPlaceholderText("Необязательно")
+        self._notes_edit.setStyleSheet("""
+            QLineEdit {
+                background-color: #1E293B;
+                color: #FFFFFF;
+                border: 2px solid #8B5CF6;
+                border-radius: 6px;
+                padding: 6px 10px;
+                font-size: 14px;
+            }
+            QLineEdit:focus {
+                border: 2px solid #A78BFA;
+                background-color: #0B0F17;
+            }
+        """)
 
         # --- DateTime ---
         self._datetime_edit = QDateTimeEdit()
@@ -565,13 +611,11 @@ class TreatmentDialog(QDialog):
         self._datetime_edit.setCalendarPopup(True)
 
         form = QFormLayout()
-        form.setSpacing(10)
-        form.addRow(self._lbl_event, self._event_type_combo)
-        form.addRow(self._lbl_glucose, self._glucose_spin)
-        form.addRow(self._lbl_carbs, self._carbs_spin)
+        form.setSpacing(12)
         form.addRow(self._lbl_insulin, self._insulin_spin)
-        form.addRow(self._lbl_datetime, self._datetime_edit)
+        form.addRow(self._lbl_carbs, self._carbs_spin)
         form.addRow(self._lbl_notes, self._notes_edit)
+        form.addRow(self._lbl_datetime, self._datetime_edit)
 
         self._buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
@@ -582,15 +626,16 @@ class TreatmentDialog(QDialog):
         ok_btn = self._buttons.button(QDialogButtonBox.StandardButton.Ok)
         if ok_btn:
             ok_btn.setText("Отправить")
+            ok_btn.setCursor(Qt.CursorShape.PointingHandCursor)
             ok_btn.setStyleSheet("""
                 QPushButton {
                     background-color: #10B981;
                     color: white;
                     font-weight: bold;
-                    font-size: 13px;
+                    font-size: 14px;
                     border-radius: 6px;
                     border: none;
-                    padding: 7px 16px;
+                    padding: 8px 18px;
                 }
                 QPushButton:hover {
                     background-color: #059669;
@@ -603,15 +648,16 @@ class TreatmentDialog(QDialog):
         cancel_btn = self._buttons.button(QDialogButtonBox.StandardButton.Cancel)
         if cancel_btn:
             cancel_btn.setText("Отмена")
+            cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
             cancel_btn.setStyleSheet("""
                 QPushButton {
                     background-color: #1E293B;
                     color: #E2E8F0;
                     font-weight: 500;
-                    font-size: 13px;
+                    font-size: 14px;
                     border-radius: 6px;
                     border: 1px solid #334155;
-                    padding: 7px 16px;
+                    padding: 8px 18px;
                 }
                 QPushButton:hover {
                     background-color: #334155;
@@ -619,209 +665,33 @@ class TreatmentDialog(QDialog):
             """)
 
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 18, 20, 18)
+        layout.setSpacing(16)
         layout.addLayout(form)
         layout.addWidget(self._buttons)
+        layout.setSizeConstraint(QVBoxLayout.SizeConstraint.SetFixedSize)
 
-        self._event_type_combo.currentTextChanged.connect(self._on_event_type_changed)
-        self._update_styles()
-
-    def _update_styles(self):
-        # 1. Insulin (Action Blue #0284C7)
-        if self._insulin_spin.isEnabled():
-            self._lbl_insulin.setStyleSheet("color: #38BDF8; font-weight: bold; font-size: 13px;")
-            self._insulin_spin.setStyleSheet("""
-                QDoubleSpinBox {
-                    background-color: #1E293B;
-                    color: #F8FAFC;
-                    border: 2px solid #0284C7;
-                    border-radius: 6px;
-                    padding: 4px 8px;
-                    font-size: 14px;
-                    font-weight: bold;
-                }
-                QDoubleSpinBox:focus {
-                    border: 2px solid #38BDF8;
-                    background-color: #0B0F17;
-                }
-                QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {
-                    background-color: #0284C7;
-                    width: 18px;
-                    border: none;
-                }
-                QDoubleSpinBox::up-button:hover, QDoubleSpinBox::down-button:hover {
-                    background-color: #0369A1;
-                }
-            """)
-        else:
-            self._lbl_insulin.setStyleSheet("color: #64748B; font-weight: normal; font-size: 13px;")
-            self._insulin_spin.setStyleSheet("""
-                QDoubleSpinBox {
-                    background-color: #0B0F17;
-                    color: #475569;
-                    border: 1px solid #1E293B;
-                    border-radius: 6px;
-                    padding: 4px 8px;
-                    font-size: 14px;
-                }
-            """)
-
-        # 2. Carbs (Amber / Warm Yellow #F59E0B)
-        if self._carbs_spin.isEnabled():
-            self._lbl_carbs.setStyleSheet("color: #FBBF24; font-weight: bold; font-size: 13px;")
-            self._carbs_spin.setStyleSheet("""
-                QDoubleSpinBox {
-                    background-color: #1E293B;
-                    color: #F8FAFC;
-                    border: 2px solid #F59E0B;
-                    border-radius: 6px;
-                    padding: 4px 8px;
-                    font-size: 14px;
-                    font-weight: bold;
-                }
-                QDoubleSpinBox:focus {
-                    border: 2px solid #FBBF24;
-                    background-color: #0B0F17;
-                }
-                QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {
-                    background-color: #F59E0B;
-                    width: 18px;
-                    border: none;
-                }
-                QDoubleSpinBox::up-button:hover, QDoubleSpinBox::down-button:hover {
-                    background-color: #D97706;
-                }
-            """)
-        else:
-            self._lbl_carbs.setStyleSheet("color: #64748B; font-weight: normal; font-size: 13px;")
-            self._carbs_spin.setStyleSheet("""
-                QDoubleSpinBox {
-                    background-color: #0B0F17;
-                    color: #475569;
-                    border: 1px solid #1E293B;
-                    border-radius: 6px;
-                    padding: 4px 8px;
-                    font-size: 14px;
-                }
-            """)
-
-        # 3. Blood Glucose (Emerald Green #10B981)
-        if self._glucose_spin.isEnabled():
-            self._lbl_glucose.setStyleSheet("color: #34D399; font-weight: bold; font-size: 13px;")
-            self._glucose_spin.setStyleSheet("""
-                QDoubleSpinBox {
-                    background-color: #1E293B;
-                    color: #F8FAFC;
-                    border: 2px solid #10B981;
-                    border-radius: 6px;
-                    padding: 4px 8px;
-                    font-size: 14px;
-                    font-weight: bold;
-                }
-                QDoubleSpinBox:focus {
-                    border: 2px solid #34D399;
-                    background-color: #0B0F17;
-                }
-                QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {
-                    background-color: #10B981;
-                    width: 18px;
-                    border: none;
-                }
-                QDoubleSpinBox::up-button:hover, QDoubleSpinBox::down-button:hover {
-                    background-color: #059669;
-                }
-            """)
-        else:
-            self._lbl_glucose.setStyleSheet("color: #64748B; font-weight: normal; font-size: 13px;")
-            self._glucose_spin.setStyleSheet("""
-                QDoubleSpinBox {
-                    background-color: #0B0F17;
-                    color: #475569;
-                    border: 1px solid #1E293B;
-                    border-radius: 6px;
-                    padding: 4px 8px;
-                    font-size: 14px;
-                }
-            """)
-
-        # 4. Notes (Purple #8B5CF6)
-        if self._notes_edit.isEnabled():
-            self._lbl_notes.setStyleSheet("color: #A78BFA; font-weight: bold; font-size: 13px;")
-            self._notes_edit.setStyleSheet("""
-                QLineEdit {
-                    background-color: #1E293B;
-                    color: #F8FAFC;
-                    border: 2px solid #8B5CF6;
-                    border-radius: 6px;
-                    padding: 5px 8px;
-                    font-size: 13px;
-                }
-                QLineEdit:focus {
-                    border: 2px solid #A78BFA;
-                    background-color: #0B0F17;
-                }
-            """)
-        else:
-            self._lbl_notes.setStyleSheet("color: #64748B; font-weight: normal; font-size: 13px;")
-            self._notes_edit.setStyleSheet("""
-                QLineEdit {
-                    background-color: #0B0F17;
-                    color: #475569;
-                    border: 1px solid #1E293B;
-                    border-radius: 6px;
-                    padding: 5px 8px;
-                    font-size: 13px;
-                }
-            """)
-
-    def _on_event_type_changed(self, label: str):
-        event_type = EVENT_TYPES_MAP.get(label, "Meal Bolus")
-        if event_type == "BG Check":
-            self._carbs_spin.setEnabled(False)
-            self._carbs_spin.setValue(0)
-            self._insulin_spin.setEnabled(False)
-            self._insulin_spin.setValue(0)
-            self._glucose_spin.setEnabled(True)
-        elif event_type == "Note":
-            self._carbs_spin.setEnabled(False)
-            self._carbs_spin.setValue(0)
-            self._insulin_spin.setEnabled(False)
-            self._insulin_spin.setValue(0)
-            self._glucose_spin.setEnabled(False)
-            self._glucose_spin.setValue(0)
-        elif event_type == "Correction Bolus":
-            self._carbs_spin.setEnabled(False)
-            self._carbs_spin.setValue(0)
-            self._insulin_spin.setEnabled(True)
-            self._glucose_spin.setEnabled(False)
-            self._glucose_spin.setValue(0)
-        elif event_type == "Carb Intake":
-            self._carbs_spin.setEnabled(True)
-            self._insulin_spin.setEnabled(False)
-            self._insulin_spin.setValue(0)
-            self._glucose_spin.setEnabled(False)
-            self._glucose_spin.setValue(0)
-        else:  # Meal Bolus
-            self._carbs_spin.setEnabled(True)
-            self._insulin_spin.setEnabled(True)
-            self._glucose_spin.setEnabled(False)
-            self._glucose_spin.setValue(0)
-        self._update_styles()
+        self.setMinimumWidth(380)
+        self._insulin_spin.setFocus()
 
     def _submit(self):
-        carbs   = self._carbs_spin.value() if self._carbs_spin.isEnabled() else 0.0
-        insulin = self._insulin_spin.value() if self._insulin_spin.isEnabled() else 0.0
-        glucose = self._glucose_spin.value() if self._glucose_spin.isEnabled() else 0.0
-        event_label = self._event_type_combo.currentText()
-        event_type = EVENT_TYPES_MAP.get(event_label, "Meal Bolus")
-        notes = self._notes_edit.text().strip()
+        carbs   = self._carbs_spin.value()
+        insulin = self._insulin_spin.value()
+        notes   = self._notes_edit.text().strip()
 
-        if event_type == "Note" and not notes:
-            QMessageBox.warning(self, "Внимание", "Для типа 'Заметка' введите текст заметки.")
+        if carbs <= 0 and insulin <= 0 and not notes:
+            QMessageBox.warning(self, "Внимание", "Укажите значение: углеводы, инсулин или заметку.")
             return
 
-        if carbs <= 0 and insulin <= 0 and glucose <= 0 and not notes:
-            QMessageBox.warning(self, "Внимание", "Укажите хотя бы одно значение: глюкоза, углеводы, инсулин или заметку.")
-            return
+        # Auto-detect event type
+        if carbs > 0 and insulin > 0:
+            event_type = "Meal Bolus"
+        elif carbs > 0:
+            event_type = "Carb Intake"
+        elif insulin > 0:
+            event_type = "Correction Bolus"
+        else:
+            event_type = "Note"
 
         qdt = self._datetime_edit.dateTime()
         ts = qdt.toSecsSinceEpoch()
@@ -837,9 +707,6 @@ class TreatmentDialog(QDialog):
             "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(ts)),
             "date": ts * 1000,
         }
-        if self._glucose_spin.isEnabled() and glucose > 0:
-            payload["glucose"] = glucose
-            payload["units"] = "mmol"
 
         url = self._base_url.rstrip("/") + "/api/v1/treatments"
         if self._api_secret:
@@ -1067,7 +934,6 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Настройки виджета")
         self.setModal(True)
-        self.resize(400, 260)
 
         self.setStyleSheet("""
             QDialog {
@@ -1202,8 +1068,12 @@ class SettingsDialog(QDialog):
             """)
 
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setSpacing(14)
         layout.addLayout(form)
         layout.addWidget(buttons)
+        layout.setSizeConstraint(QVBoxLayout.SizeConstraint.SetFixedSize)
+        self.setMinimumWidth(400)
 
     def _on_opacity_change(self, value: int):
         self._opacity_label.setText(f"{value}%")
