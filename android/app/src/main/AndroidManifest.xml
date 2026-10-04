@@ -31,6 +31,7 @@
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="com.xdripwidget.android.ALARM_TICK" />
+                <action android:name="com.xdripwidget.android.MANUAL_REFRESH" />
             </intent-filter>
 
             <meta-data

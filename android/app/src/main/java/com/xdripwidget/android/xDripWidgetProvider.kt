@@ -17,6 +17,7 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import java.util.concurrent.TimeUnit
+import kotlin.concurrent.thread
 
 class xDripWidgetProvider : AppWidgetProvider() {
 
@@ -26,6 +27,19 @@ class xDripWidgetProvider : AppWidgetProvider() {
         appWidgetIds: IntArray
     ) {
         Log.d(TAG, "onUpdate triggered for ${appWidgetIds.size} widgets")
+        for (appWidgetId in appWidgetIds) {
+            val views = RemoteViews(context.packageName, R.layout.widget_layout_4x1)
+            val refreshIntent = Intent(context, xDripWidgetProvider::class.java).apply {
+                action = ACTION_MANUAL_REFRESH
+            }
+            val pendingIntent = PendingIntent.getBroadcast(
+                context, 0, refreshIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            views.setOnClickPendingIntent(R.id.widget_container, pendingIntent)
+            views.setOnClickPendingIntent(R.id.top_block, pendingIntent)
+            appWidgetManager.partiallyUpdateAppWidget(appWidgetId, views)
+        }
         enqueueOneTimeUpdate(context)
         scheduleExactAlarm(context)
     }
@@ -73,14 +87,42 @@ class xDripWidgetProvider : AppWidgetProvider() {
 
                 // Immediate visual feedback
                 showRefreshingState(context)
-                enqueueOneTimeUpdate(context)
                 scheduleExactAlarm(context)
+
+                // Instant background update via thread + goAsync
+                val pendingResult = goAsync()
+                thread(name = "xDripWidget-TapRefresh") {
+                    try {
+                        WidgetUpdateWorker.executeFetchAndUpdate(context)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Manual refresh execution error: ${e.message}", e)
+                    } finally {
+                        try {
+                            pendingResult.finish()
+                        } catch (eFinish: Exception) {
+                            Log.e(TAG, "Error finishing goAsync: ${eFinish.message}")
+                        }
+                    }
+                }
             }
 
             ACTION_ALARM_TICK, Intent.ACTION_BOOT_COMPLETED -> {
                 Log.d(TAG, "Alarm tick / Boot completed -> updating widget")
-                enqueueOneTimeUpdate(context)
                 scheduleExactAlarm(context)
+                val pendingResult = goAsync()
+                thread(name = "xDripWidget-AlarmRefresh") {
+                    try {
+                        WidgetUpdateWorker.executeFetchAndUpdate(context)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Alarm tick execution error: ${e.message}", e)
+                    } finally {
+                        try {
+                            pendingResult.finish()
+                        } catch (eFinish: Exception) {
+                            Log.e(TAG, "Error finishing goAsync: ${eFinish.message}")
+                        }
+                    }
+                }
             }
         }
     }
@@ -94,6 +136,17 @@ class xDripWidgetProvider : AppWidgetProvider() {
             for (appWidgetId in appWidgetIds) {
                 val views = RemoteViews(context.packageName, R.layout.widget_layout_4x1)
                 views.setTextViewText(R.id.tv_time, "Обновление...")
+
+                val refreshIntent = Intent(context, xDripWidgetProvider::class.java).apply {
+                    action = ACTION_MANUAL_REFRESH
+                }
+                val pendingIntent = PendingIntent.getBroadcast(
+                    context, 0, refreshIntent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
+                views.setOnClickPendingIntent(R.id.widget_container, pendingIntent)
+                views.setOnClickPendingIntent(R.id.top_block, pendingIntent)
+
                 appWidgetManager.partiallyUpdateAppWidget(appWidgetId, views)
             }
         } catch (e: Exception) {
