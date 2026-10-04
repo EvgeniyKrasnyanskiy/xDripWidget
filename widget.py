@@ -133,11 +133,12 @@ CONFIG_FILE  = "config.ini"
 POLL_INTERVAL_MS = 60_000   # 60 s
 ALERT_COOLDOWN_S = 3_600    # 1 h between same-type alerts
 
-# Thresholds (mmol/L)
-HYPO_SEVERE  = 3.3
-HYPO_MILD    = 3.9
-HYPER_MILD   = 7.8
-HYPER_SEVERE = 10.0
+# Thresholds (mmol/L) - AGP 6-band clinical consensus
+HYPO_SEVERE   = 3.0   # Very Low threshold (< 3.0)
+HYPO_MILD     = 3.9   # Low threshold (3.0 - 3.8)
+HYPER_TIGHT   = 7.8   # Tight corridor upper bound (3.9 - 7.8)
+HYPER_TARGET  = 10.0  # Standard target upper bound (7.9 - 10.0)
+HYPER_SEVERE  = 13.9  # High upper bound / Very High threshold (>= 14.0)
 STALE_MINUTES = 15
 
 # Alert thresholds
@@ -159,15 +160,31 @@ TREND_ARROWS: dict[str, str] = {
 }
 
 # ---------------------------------------------------------------------------
-# Colors
+# Colors (Unified with tirup / AGP clinical standard)
 # ---------------------------------------------------------------------------
-COLOR_GREEN    = QColor("#27ae60")
-COLOR_YELLOW   = QColor("#f39c12")
-COLOR_RED      = QColor("#e74c3c")
-COLOR_SOFT_RED = QColor("#e57373")
-COLOR_GRAY     = QColor("#7f8c8d")
-COLOR_BG       = QColor(20, 20, 30)
-COLOR_SUB      = QColor("#bdc3c7")
+COLOR_VERY_LOW  = QColor("#EF4444")  # Urgent Red < 3.0
+COLOR_LOW       = QColor("#F59E0B")  # Warning Amber 3.0 - 3.8
+COLOR_TIGHT     = QColor("#4ADE80")  # Pale Green 3.9 - 7.8
+COLOR_TARGET    = QColor("#10B981")  # Emerald Green 7.9 - 10.0
+COLOR_HIGH      = QColor("#F59E0B")  # Warning Amber 10.1 - 13.9
+COLOR_VERY_HIGH = QColor("#EF4444")  # Urgent Red >= 14.0
+COLOR_GRAY      = QColor("#94A3B8")  # Slate Gray (Stale / Inactive)
+COLOR_BG        = QColor("#0F172A")  # Deep Slate Dark BG
+COLOR_SURFACE   = QColor("#1E293B")  # Card Surface
+COLOR_BORDER    = QColor("#334155")  # Border / Outline
+COLOR_SUB       = QColor("#94A3B8")  # Muted Text
+
+# Backward-compatibility aliases
+COLOR_GREEN     = COLOR_TARGET
+COLOR_YELLOW    = COLOR_LOW
+COLOR_RED       = COLOR_VERY_LOW
+COLOR_SOFT_RED  = COLOR_VERY_HIGH
+
+# Treatment & Event Colors (as in tirup / DailyGlucoseChart)
+COLOR_INSULIN   = QColor("#0284C7")  # Action Blue
+COLOR_CARBS     = QColor("#F59E0B")  # Amber / Warm Yellow
+COLOR_NOTE      = QColor("#8B5CF6")  # Purple
+COLOR_GLUCOSE   = QColor("#10B981")  # Emerald / Target Green
 
 
 def get_config_path() -> str:
@@ -211,17 +228,19 @@ def get_window_opacity(s: QSettings) -> float:
 
 
 def glucose_color(mmol: float, stale: bool) -> QColor:
-    if stale:
+    if stale or mmol <= 0.0:
         return COLOR_GRAY
-    if mmol <= HYPO_SEVERE:
-        return COLOR_RED
+    if mmol < HYPO_SEVERE:
+        return COLOR_VERY_LOW
     if mmol < HYPO_MILD:
-        return COLOR_YELLOW
-    if mmol <= HYPER_MILD:
-        return COLOR_GREEN
-    if mmol < HYPER_SEVERE:
-        return COLOR_YELLOW
-    return COLOR_SOFT_RED
+        return COLOR_LOW
+    if mmol <= HYPER_TIGHT:
+        return COLOR_TIGHT
+    if mmol <= HYPER_TARGET:
+        return COLOR_TARGET
+    if mmol <= HYPER_SEVERE:
+        return COLOR_HIGH
+    return COLOR_VERY_HIGH
 
 
 def format_time_ago(minutes_ago: int) -> str:
@@ -239,10 +258,10 @@ def battery_color(pct: int) -> QColor:
     if pct < 0:
         return COLOR_GRAY
     if pct <= 20:
-        return COLOR_RED
+        return COLOR_VERY_LOW
     if pct <= 50:
-        return COLOR_YELLOW
-    return COLOR_GREEN
+        return COLOR_LOW
+    return COLOR_TARGET
 
 
 def create_blood_drop_icon(color: QColor, size: int = 32) -> QIcon:
@@ -421,9 +440,57 @@ class TreatmentDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Ввод данных терапии")
         self.setModal(True)
-        self.resize(380, 300)
+        self.resize(420, 360)
         self._base_url = base_url
         self._api_secret = api_secret
+
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #0F172A;
+                color: #F8FAFC;
+                font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            }
+            QLabel {
+                font-size: 13px;
+                color: #94A3B8;
+            }
+            QComboBox, QDateTimeEdit {
+                background-color: #1E293B;
+                color: #F8FAFC;
+                border: 1px solid #334155;
+                border-radius: 6px;
+                padding: 5px 8px;
+                font-size: 13px;
+                selection-background-color: #0284C7;
+            }
+            QComboBox:focus, QDateTimeEdit:focus {
+                border: 1px solid #0284C7;
+            }
+            QComboBox::drop-down, QDateTimeEdit::drop-down {
+                border: none;
+                width: 22px;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #1E293B;
+                color: #F8FAFC;
+                selection-background-color: #0284C7;
+                selection-color: #FFFFFF;
+                border: 1px solid #334155;
+                outline: none;
+            }
+            QCalendarWidget QWidget {
+                background-color: #1E293B;
+                color: #F8FAFC;
+            }
+        """)
+
+        # --- Labels ---
+        self._lbl_event = QLabel("Тип события:")
+        self._lbl_glucose = QLabel("Глюкоза крови:")
+        self._lbl_carbs = QLabel("Углеводы:")
+        self._lbl_insulin = QLabel("Инсулин:")
+        self._lbl_datetime = QLabel("Дата/Время:")
+        self._lbl_notes = QLabel("Заметка:")
 
         # --- Glucose BG (optional) ---
         self._glucose_spin = QDoubleSpinBox()
@@ -459,12 +526,13 @@ class TreatmentDialog(QDialog):
         self._datetime_edit.setCalendarPopup(True)
 
         form = QFormLayout()
-        form.addRow("Тип события:", self._event_type_combo)
-        form.addRow("Глюкоза крови:", self._glucose_spin)
-        form.addRow("Углеводы:", self._carbs_spin)
-        form.addRow("Инсулин:", self._insulin_spin)
-        form.addRow("Дата/Время:", self._datetime_edit)
-        form.addRow("Заметка:", self._notes_edit)
+        form.setSpacing(10)
+        form.addRow(self._lbl_event, self._event_type_combo)
+        form.addRow(self._lbl_glucose, self._glucose_spin)
+        form.addRow(self._lbl_carbs, self._carbs_spin)
+        form.addRow(self._lbl_insulin, self._insulin_spin)
+        form.addRow(self._lbl_datetime, self._datetime_edit)
+        form.addRow(self._lbl_notes, self._notes_edit)
 
         self._buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
@@ -472,11 +540,199 @@ class TreatmentDialog(QDialog):
         self._buttons.accepted.connect(self._submit)
         self._buttons.rejected.connect(self.reject)
 
+        ok_btn = self._buttons.button(QDialogButtonBox.StandardButton.Ok)
+        if ok_btn:
+            ok_btn.setText("Отправить")
+            ok_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #10B981;
+                    color: white;
+                    font-weight: bold;
+                    font-size: 13px;
+                    border-radius: 6px;
+                    border: none;
+                    padding: 7px 16px;
+                }
+                QPushButton:hover {
+                    background-color: #059669;
+                }
+                QPushButton:disabled {
+                    background-color: #334155;
+                    color: #64748B;
+                }
+            """)
+        cancel_btn = self._buttons.button(QDialogButtonBox.StandardButton.Cancel)
+        if cancel_btn:
+            cancel_btn.setText("Отмена")
+            cancel_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #1E293B;
+                    color: #E2E8F0;
+                    font-weight: 500;
+                    font-size: 13px;
+                    border-radius: 6px;
+                    border: 1px solid #334155;
+                    padding: 7px 16px;
+                }
+                QPushButton:hover {
+                    background-color: #334155;
+                }
+            """)
+
         layout = QVBoxLayout(self)
         layout.addLayout(form)
         layout.addWidget(self._buttons)
 
         self._event_type_combo.currentTextChanged.connect(self._on_event_type_changed)
+        self._update_styles()
+
+    def _update_styles(self):
+        # 1. Insulin (Action Blue #0284C7)
+        if self._insulin_spin.isEnabled():
+            self._lbl_insulin.setStyleSheet("color: #38BDF8; font-weight: bold; font-size: 13px;")
+            self._insulin_spin.setStyleSheet("""
+                QDoubleSpinBox {
+                    background-color: #1E293B;
+                    color: #F8FAFC;
+                    border: 2px solid #0284C7;
+                    border-radius: 6px;
+                    padding: 4px 8px;
+                    font-size: 14px;
+                    font-weight: bold;
+                }
+                QDoubleSpinBox:focus {
+                    border: 2px solid #38BDF8;
+                    background-color: #0B0F17;
+                }
+                QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {
+                    background-color: #0284C7;
+                    width: 18px;
+                    border: none;
+                }
+                QDoubleSpinBox::up-button:hover, QDoubleSpinBox::down-button:hover {
+                    background-color: #0369A1;
+                }
+            """)
+        else:
+            self._lbl_insulin.setStyleSheet("color: #64748B; font-weight: normal; font-size: 13px;")
+            self._insulin_spin.setStyleSheet("""
+                QDoubleSpinBox {
+                    background-color: #0B0F17;
+                    color: #475569;
+                    border: 1px solid #1E293B;
+                    border-radius: 6px;
+                    padding: 4px 8px;
+                    font-size: 14px;
+                }
+            """)
+
+        # 2. Carbs (Amber / Warm Yellow #F59E0B)
+        if self._carbs_spin.isEnabled():
+            self._lbl_carbs.setStyleSheet("color: #FBBF24; font-weight: bold; font-size: 13px;")
+            self._carbs_spin.setStyleSheet("""
+                QDoubleSpinBox {
+                    background-color: #1E293B;
+                    color: #F8FAFC;
+                    border: 2px solid #F59E0B;
+                    border-radius: 6px;
+                    padding: 4px 8px;
+                    font-size: 14px;
+                    font-weight: bold;
+                }
+                QDoubleSpinBox:focus {
+                    border: 2px solid #FBBF24;
+                    background-color: #0B0F17;
+                }
+                QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {
+                    background-color: #F59E0B;
+                    width: 18px;
+                    border: none;
+                }
+                QDoubleSpinBox::up-button:hover, QDoubleSpinBox::down-button:hover {
+                    background-color: #D97706;
+                }
+            """)
+        else:
+            self._lbl_carbs.setStyleSheet("color: #64748B; font-weight: normal; font-size: 13px;")
+            self._carbs_spin.setStyleSheet("""
+                QDoubleSpinBox {
+                    background-color: #0B0F17;
+                    color: #475569;
+                    border: 1px solid #1E293B;
+                    border-radius: 6px;
+                    padding: 4px 8px;
+                    font-size: 14px;
+                }
+            """)
+
+        # 3. Blood Glucose (Emerald Green #10B981)
+        if self._glucose_spin.isEnabled():
+            self._lbl_glucose.setStyleSheet("color: #34D399; font-weight: bold; font-size: 13px;")
+            self._glucose_spin.setStyleSheet("""
+                QDoubleSpinBox {
+                    background-color: #1E293B;
+                    color: #F8FAFC;
+                    border: 2px solid #10B981;
+                    border-radius: 6px;
+                    padding: 4px 8px;
+                    font-size: 14px;
+                    font-weight: bold;
+                }
+                QDoubleSpinBox:focus {
+                    border: 2px solid #34D399;
+                    background-color: #0B0F17;
+                }
+                QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {
+                    background-color: #10B981;
+                    width: 18px;
+                    border: none;
+                }
+                QDoubleSpinBox::up-button:hover, QDoubleSpinBox::down-button:hover {
+                    background-color: #059669;
+                }
+            """)
+        else:
+            self._lbl_glucose.setStyleSheet("color: #64748B; font-weight: normal; font-size: 13px;")
+            self._glucose_spin.setStyleSheet("""
+                QDoubleSpinBox {
+                    background-color: #0B0F17;
+                    color: #475569;
+                    border: 1px solid #1E293B;
+                    border-radius: 6px;
+                    padding: 4px 8px;
+                    font-size: 14px;
+                }
+            """)
+
+        # 4. Notes (Purple #8B5CF6)
+        if self._notes_edit.isEnabled():
+            self._lbl_notes.setStyleSheet("color: #A78BFA; font-weight: bold; font-size: 13px;")
+            self._notes_edit.setStyleSheet("""
+                QLineEdit {
+                    background-color: #1E293B;
+                    color: #F8FAFC;
+                    border: 2px solid #8B5CF6;
+                    border-radius: 6px;
+                    padding: 5px 8px;
+                    font-size: 13px;
+                }
+                QLineEdit:focus {
+                    border: 2px solid #A78BFA;
+                    background-color: #0B0F17;
+                }
+            """)
+        else:
+            self._lbl_notes.setStyleSheet("color: #64748B; font-weight: normal; font-size: 13px;")
+            self._notes_edit.setStyleSheet("""
+                QLineEdit {
+                    background-color: #0B0F17;
+                    color: #475569;
+                    border: 1px solid #1E293B;
+                    border-radius: 6px;
+                    padding: 5px 8px;
+                    font-size: 13px;
+                }
+            """)
 
     def _on_event_type_changed(self, label: str):
         event_type = EVENT_TYPES_MAP.get(label, "Meal Bolus")
@@ -510,6 +766,7 @@ class TreatmentDialog(QDialog):
             self._insulin_spin.setEnabled(True)
             self._glucose_spin.setEnabled(False)
             self._glucose_spin.setValue(0)
+        self._update_styles()
 
     def _submit(self):
         carbs   = self._carbs_spin.value() if self._carbs_spin.isEnabled() else 0.0
@@ -563,7 +820,7 @@ class TreatmentDialog(QDialog):
             ok_btn = self._buttons.button(QDialogButtonBox.StandardButton.Ok)
             if ok_btn:
                 ok_btn.setText("✔ Успешно")
-                ok_btn.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold; font-size: 13px; border-radius: 4px;")
+                ok_btn.setStyleSheet("background-color: #10B981; color: white; font-weight: bold; font-size: 13px; border-radius: 6px; border: none; padding: 7px 16px;")
             QTimer.singleShot(1000, self.accept)
         except Exception as e:
             logger.error(f"Failed to submit treatment: {e}")
@@ -587,9 +844,43 @@ class TreatmentHistoryDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("История терапий (Удаление с сервера)")
         self.setModal(True)
-        self.resize(640, 340)
+        self.resize(660, 360)
         self._base_url = base_url
         self._api_secret = api_secret
+
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #0F172A;
+                color: #F8FAFC;
+                font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            }
+            QTableWidget {
+                background-color: #0F172A;
+                color: #F8FAFC;
+                gridline-color: #1E293B;
+                border: 1px solid #334155;
+                border-radius: 6px;
+                selection-background-color: #1E293B;
+                selection-color: #F8FAFC;
+            }
+            QHeaderView::section {
+                background-color: #1E293B;
+                color: #94A3B8;
+                font-weight: bold;
+                border: 1px solid #334155;
+                padding: 6px;
+            }
+            QScrollBar:vertical, QScrollBar:horizontal {
+                background-color: #0F172A;
+                border: none;
+                width: 10px;
+                height: 10px;
+            }
+            QScrollBar::handle {
+                background-color: #334155;
+                border-radius: 5px;
+            }
+        """)
 
         self._table = QTableWidget()
         self._table.setColumnCount(6)
@@ -598,8 +889,10 @@ class TreatmentHistoryDialog(QDialog):
         self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
 
         btn_refresh = QPushButton("Обновить список")
+        btn_refresh.setStyleSheet("QPushButton { background-color: #0284C7; color: white; font-weight: bold; border-radius: 6px; padding: 6px 14px; border: none; } QPushButton:hover { background-color: #0369A1; }")
         btn_refresh.clicked.connect(self._load_treatments)
         btn_close = QPushButton("Закрыть")
+        btn_close.setStyleSheet("QPushButton { background-color: #1E293B; color: #E2E8F0; font-weight: 500; border: 1px solid #334155; border-radius: 6px; padding: 6px 14px; } QPushButton:hover { background-color: #334155; }")
         btn_close.clicked.connect(self.accept)
 
         btn_layout = QHBoxLayout()
@@ -669,14 +962,27 @@ class TreatmentHistoryDialog(QDialog):
 
             item_uuid = str(item.get("uuid") or item.get("_id") or item.get("id", ""))
 
-            self._table.setItem(row_idx, 0, QTableWidgetItem(dt_str))
-            self._table.setItem(row_idx, 1, QTableWidgetItem(type_str))
-            self._table.setItem(row_idx, 2, QTableWidgetItem(glucose_str))
-            self._table.setItem(row_idx, 3, QTableWidgetItem(carbs_str))
-            self._table.setItem(row_idx, 4, QTableWidgetItem(insulin_str))
+            item_dt = QTableWidgetItem(dt_str)
+            item_type = QTableWidgetItem(type_str)
+            item_gluc = QTableWidgetItem(glucose_str)
+            item_carbs = QTableWidgetItem(carbs_str)
+            item_ins = QTableWidgetItem(insulin_str)
+
+            if raw_glucose is not None and glucose_str != "—":
+                item_gluc.setForeground(QBrush(COLOR_TARGET))
+            if carbs > 0:
+                item_carbs.setForeground(QBrush(COLOR_CARBS))
+            if insulin > 0:
+                item_ins.setForeground(QBrush(COLOR_INSULIN))
+
+            self._table.setItem(row_idx, 0, item_dt)
+            self._table.setItem(row_idx, 1, item_type)
+            self._table.setItem(row_idx, 2, item_gluc)
+            self._table.setItem(row_idx, 3, item_carbs)
+            self._table.setItem(row_idx, 4, item_ins)
 
             btn_del = QPushButton("Удалить")
-            btn_del.setStyleSheet("background-color: #e74c3c; color: white; border-radius: 3px; font-weight: bold;")
+            btn_del.setStyleSheet("QPushButton { background-color: #EF4444; color: white; border-radius: 4px; font-weight: bold; padding: 4px 8px; border: none; } QPushButton:hover { background-color: #DC2626; }")
             btn_del.clicked.connect(lambda _, uid=item_uuid, c=carbs, i=insulin: self._delete_item(uid, c, i))
             self._table.setCellWidget(row_idx, 5, btn_del)
             row_idx += 1
@@ -722,7 +1028,53 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Настройки виджета")
         self.setModal(True)
-        self.resize(370, 220)
+        self.resize(400, 260)
+
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #0F172A;
+                color: #F8FAFC;
+                font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            }
+            QLabel {
+                color: #94A3B8;
+                font-size: 13px;
+            }
+            QLineEdit, QSpinBox, QComboBox {
+                background-color: #1E293B;
+                color: #F8FAFC;
+                border: 1px solid #334155;
+                border-radius: 6px;
+                padding: 5px 8px;
+                font-size: 13px;
+            }
+            QLineEdit:focus, QSpinBox:focus, QComboBox:focus {
+                border: 1px solid #0284C7;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #1E293B;
+                color: #F8FAFC;
+                selection-background-color: #0284C7;
+                selection-color: #FFFFFF;
+                border: 1px solid #334155;
+            }
+            QSlider::groove:horizontal {
+                height: 6px;
+                background: #334155;
+                border-radius: 3px;
+            }
+            QSlider::sub-page:horizontal {
+                background: #0284C7;
+                border-radius: 3px;
+            }
+            QSlider::handle:horizontal {
+                background: #F8FAFC;
+                width: 16px;
+                margin-top: -5px;
+                margin-bottom: -5px;
+                border-radius: 8px;
+            }
+        """)
 
         s = get_settings()
         self._url_edit    = QLineEdit(str(s.value("server_url", DEFAULT_URL)))
@@ -764,6 +1116,7 @@ class SettingsDialog(QDialog):
         self._interval_spin.setSuffix(" мин")
 
         form = QFormLayout()
+        form.setSpacing(10)
         form.addRow("URL сервера:", self._url_edit)
         form.addRow("API Secret:",  self._secret_edit)
         form.addRow("Прозрачность:", opacity_row)
@@ -775,6 +1128,39 @@ class SettingsDialog(QDialog):
         )
         buttons.accepted.connect(self._save)
         buttons.rejected.connect(self.reject)
+
+        ok_btn = buttons.button(QDialogButtonBox.StandardButton.Ok)
+        if ok_btn:
+            ok_btn.setText("Сохранить")
+            ok_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #10B981;
+                    color: white;
+                    font-weight: bold;
+                    border-radius: 6px;
+                    padding: 7px 16px;
+                    border: none;
+                }
+                QPushButton:hover {
+                    background-color: #059669;
+                }
+            """)
+        cancel_btn = buttons.button(QDialogButtonBox.StandardButton.Cancel)
+        if cancel_btn:
+            cancel_btn.setText("Отмена")
+            cancel_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #1E293B;
+                    color: #E2E8F0;
+                    font-weight: 500;
+                    border: 1px solid #334155;
+                    border-radius: 6px;
+                    padding: 7px 16px;
+                }
+                QPushButton:hover {
+                    background-color: #334155;
+                }
+            """)
 
         layout = QVBoxLayout(self)
         layout.addLayout(form)
@@ -809,24 +1195,45 @@ class AboutDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("О программе")
         self.setModal(True)
-        self.resize(400, 340)
+        self.resize(440, 410)
+
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #0F172A;
+                color: #F8FAFC;
+                font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            }
+            QTextBrowser {
+                background-color: #1E293B;
+                color: #F8FAFC;
+                border: 1px solid #334155;
+                border-radius: 8px;
+                padding: 10px;
+            }
+        """)
 
         text = QTextBrowser()
         text.setOpenExternalLinks(True)
         text.setHtml(f"""
             <h2 style="margin:0 0 4px 0">{APP_NAME} &nbsp; v{APP_VERSION}</h2>
-            <p style="margin:0 0 8px 0; color:#888">
+            <p style="margin:0 0 8px 0; color:#94A3B8">
                 Ультра-лёгкий десктопный и мобильный виджет мониторинга глюкозы крови.
             </p>
             <p><b>Совместимость:</b> xDrip+, AAPS (AndroidAPS)<br>
                <b>Протокол:</b> Nightscout REST API<br>
                <b>Файл настроек:</b> config.ini (hot-reload)</p>
-            <p><b>🎨 Цветовая схема порогов глюкозы:</b><br>
-               🔴 <b>&le; 3.3 ммоль/л:</b> Тяжелая гипогликемия (Ярко-красный)<br>
-               🟡 <b>3.4 – 3.8 ммоль/л:</b> Легкая гипогликемия (Жёлтый)<br>
-               🟢 <b>3.9 – 7.8 ммоль/л:</b> Целевая норма (Зелёный)<br>
-               🟡 <b>7.9 – 9.9 ммоль/л:</b> Легкая гипергликемия (Жёлтый)<br>
-               🔴 <b>&ge; 10.0 ммоль/л:</b> Гипергликемия (Мягкий красный)</p>
+            <p><b>🎨 Цветовая схема порогов глюкозы (стандарт TIR/AGP):</b><br>
+               🔴 <b>&lt; 3.0 ммоль/л:</b> Очень низкий (Тревожный #EF4444)<br>
+               🟡 <b>3.0 – 3.8 ммоль/л:</b> Низкий (Янтарный #F59E0B)<br>
+               🟢 <b>3.9 – 7.8 ммоль/л:</b> Целевой узкий Tight (Светло-зеленый #4ADE80)<br>
+               🟢 <b>7.9 – 10.0 ммоль/л:</b> Целевой стандартный (Изумрудный #10B981)<br>
+               🟡 <b>10.1 – 13.9 ммоль/л:</b> Высокий (Янтарный #F59E0B)<br>
+               🔴 <b>&ge; 14.0 ммоль/л:</b> Очень высокий (Тревожный #EF4444)</p>
+            <p><b>💉 Цветовая кодировка терапий:</b><br>
+               🔵 <b>Инсулин:</b> Action Blue (#0284C7)<br>
+               🟡 <b>Углеводы:</b> Amber (#F59E0B)<br>
+               🟢 <b>Глюкоза крови:</b> Emerald (#10B981)<br>
+               🟣 <b>Заметки:</b> Purple (#8B5CF6)</p>
             <p><b>Пороги оповещений:</b><br>
                🔴 Гипо:&nbsp;&nbsp;&nbsp;&nbsp; &lt; {ALERT_HYPO} ммоль/л<br>
                🟡 Гипер:&nbsp;&nbsp;&nbsp; &gt; {ALERT_HYPER} ммоль/л<br>
@@ -838,6 +1245,34 @@ class AboutDialog(QDialog):
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok)
         btn_update = buttons.addButton("Проверить обновления…", QDialogButtonBox.ButtonRole.ActionRole)
+        btn_update.setStyleSheet("""
+            QPushButton {
+                background-color: #0284C7;
+                color: white;
+                font-weight: bold;
+                border-radius: 6px;
+                padding: 6px 14px;
+                border: none;
+            }
+            QPushButton:hover {
+                background-color: #0369A1;
+            }
+        """)
+        ok_btn = buttons.button(QDialogButtonBox.StandardButton.Ok)
+        if ok_btn:
+            ok_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #10B981;
+                    color: white;
+                    font-weight: bold;
+                    border-radius: 6px;
+                    padding: 6px 16px;
+                    border: none;
+                }
+                QPushButton:hover {
+                    background-color: #059669;
+                }
+            """)
         btn_update.clicked.connect(self._check_updates)
         buttons.accepted.connect(self.accept)
 
@@ -913,6 +1348,29 @@ class GlucoseWidget(QWidget):
 
     def _build_tray_menu(self) -> QMenu:
         menu = QMenu()
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: #1E293B;
+                color: #F8FAFC;
+                border: 1px solid #334155;
+                border-radius: 8px;
+                padding: 4px;
+            }
+            QMenu::item {
+                padding: 6px 20px 6px 12px;
+                border-radius: 4px;
+                font-size: 13px;
+            }
+            QMenu::item:selected {
+                background-color: #0284C7;
+                color: #FFFFFF;
+            }
+            QMenu::separator {
+                height: 1px;
+                background-color: #334155;
+                margin: 4px 8px;
+            }
+        """)
         for label, slot in [
             ("Показать / скрыть",          self._toggle_visibility),
             ("Обновить сейчас",            self._fetch),
@@ -1229,7 +1687,7 @@ class GlucoseWidget(QWidget):
 
         b_color = COLOR_GRAY if (pct < 0 or stale) else battery_color(pct)
 
-        painter.setPen(QPen(COLOR_SUB, 1))
+        painter.setPen(QPen(COLOR_BORDER, 1))
         painter.setBrush(QBrush(Qt.BrushStyle.NoBrush))
         painter.drawRoundedRect(BAR_X, BAR_Y, BAR_W, BAR_H, RADIUS, RADIUS)
 
@@ -1246,7 +1704,7 @@ class GlucoseWidget(QWidget):
         cap_x = BAR_X + BAR_W + 2
         cap_y = BAR_Y + (BAR_H - CAP_H) // 2
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QBrush(COLOR_SUB))
+        painter.setBrush(QBrush(COLOR_BORDER))
         painter.drawRoundedRect(cap_x, cap_y, CAP_W, CAP_H, 1, 1)
 
         label = f"{pct}%" if pct >= 0 else "—"
@@ -1291,10 +1749,10 @@ class GlucoseWidget(QWidget):
         bot_corridor = max(GY, min(GY + GH, y_lo))
         if bot_corridor > top_corridor:
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QBrush(QColor(39, 174, 96, 25)))
+            painter.setBrush(QBrush(QColor(74, 222, 128, 30)))
             painter.drawRect(QRectF(GX, top_corridor, GW, bot_corridor - top_corridor))
 
-        painter.setPen(QPen(QColor(39, 174, 96, 80), 1, Qt.PenStyle.DashLine))
+        painter.setPen(QPen(QColor(74, 222, 128, 90), 1, Qt.PenStyle.DashLine))
         if GY <= y_lo <= GY + GH:
             painter.drawLine(GX, int(y_lo), GX + GW, int(y_lo))
         if GY <= y_hi <= GY + GH:
@@ -1313,19 +1771,19 @@ class GlucoseWidget(QWidget):
             dot_color = glucose_color(v, stale=False)
             points.append((px, py, dot_color))
 
-        painter.setPen(QPen(QColor(200, 200, 200, 70), 1.2))
+        painter.setPen(QPen(QColor(148, 163, 184, 70), 1.2))
         for i in range(len(points) - 1):
             p1, p2 = points[i], points[i + 1]
             painter.drawLine(p1[0], p1[1], p2[0], p2[1])
 
         for px, py, dot_color in points:
-            painter.setPen(QPen(dot_color.darker(120), 1))
+            painter.setPen(QPen(dot_color.darker(115), 1))
             painter.setBrush(QBrush(dot_color))
             painter.drawEllipse(QPoint(px, py), 3, 3)
 
         # ── 4-Hour Time Axis / Timeline ───────────────────────────────
         axis_y = GY + GH + 4
-        painter.setPen(QPen(QColor(255, 255, 255, 35), 1))
+        painter.setPen(QPen(QColor(51, 65, 85, 120), 1))
         painter.drawLine(GX, axis_y, GX + GW, axis_y)
 
         # Tick marks
@@ -1335,7 +1793,7 @@ class GlucoseWidget(QWidget):
         painter.drawLine(GX + GW, axis_y, GX + GW, axis_y + 3)
 
         # Time labels
-        painter.setPen(QColor(180, 180, 180, 150))
+        painter.setPen(QColor(148, 163, 184, 180))
         painter.setFont(self._font_sml)
         painter.drawText(
             GX, axis_y + 2, 50, 16,
@@ -1389,6 +1847,29 @@ class GlucoseWidget(QWidget):
         menu = QMenu(self)
         menu.setWindowFlags(menu.windowFlags() | Qt.WindowType.FramelessWindowHint)
         menu.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: #1E293B;
+                color: #F8FAFC;
+                border: 1px solid #334155;
+                border-radius: 8px;
+                padding: 4px;
+            }
+            QMenu::item {
+                padding: 6px 20px 6px 12px;
+                border-radius: 4px;
+                font-size: 13px;
+            }
+            QMenu::item:selected {
+                background-color: #0284C7;
+                color: #FFFFFF;
+            }
+            QMenu::separator {
+                height: 1px;
+                background-color: #334155;
+                margin: 4px 8px;
+            }
+        """)
 
         entries = [
             ("Обновить сейчас",            self._fetch),

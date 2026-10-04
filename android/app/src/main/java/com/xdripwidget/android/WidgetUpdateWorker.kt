@@ -300,12 +300,13 @@ class WidgetUpdateWorker(
     }
 
     private fun getGlucoseColorHex(mmol: Double, stale: Boolean): String {
-        if (stale) return "#7f8c8d"
-        if (mmol <= 3.3) return "#e74c3c"
-        if (mmol < 3.9) return "#f39c12"
-        if (mmol <= 7.8) return "#27ae60"
-        if (mmol < 10.0) return "#f39c12"
-        return "#e57373"
+        if (stale || mmol <= 0.0) return "#94A3B8"
+        if (mmol < 3.0) return "#EF4444"
+        if (mmol < 3.9) return "#F59E0B"
+        if (mmol <= 7.8) return "#4ADE80"
+        if (mmol <= 10.0) return "#10B981"
+        if (mmol <= 13.9) return "#F59E0B"
+        return "#EF4444"
     }
 
     private fun formatTimeAgo(minutesAgo: Int): String {
@@ -332,17 +333,17 @@ class WidgetUpdateWorker(
         val paint = Paint(Paint.ANTI_ALIAS_FLAG)
 
         val bColor = when {
-            stale -> Color.parseColor("#7f8c8d")
-            pct <= 20 -> Color.parseColor("#e74c3c")
-            pct <= 50 -> Color.parseColor("#f39c12")
-            else -> Color.parseColor("#27ae60")
+            stale -> Color.parseColor("#94A3B8")
+            pct <= 20 -> Color.parseColor("#EF4444")
+            pct <= 50 -> Color.parseColor("#F59E0B")
+            else -> Color.parseColor("#10B981")
         }
 
         // Frame
         val frameRect = RectF(1.5f, 3f, 44f, 23f)
         paint.style = Paint.Style.STROKE
         paint.strokeWidth = 2.2f
-        paint.color = Color.parseColor("#bdc3c7")
+        paint.color = Color.parseColor("#334155")
         canvas.drawRoundRect(frameRect, 3.5f, 3.5f, paint)
 
         // Tip
@@ -360,7 +361,7 @@ class WidgetUpdateWorker(
 
         // Percentage text
         paint.style = Paint.Style.FILL
-        paint.color = Color.parseColor("#bdc3c7")
+        paint.color = Color.parseColor("#94A3B8")
         paint.textSize = 17f
         paint.typeface = Typeface.DEFAULT_BOLD
         canvas.drawText("$pct%", 52f, 18.5f, paint)
@@ -410,7 +411,7 @@ class WidgetUpdateWorker(
         if (botCorridor > topCorridor) {
             val corridorPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 style = Paint.Style.FILL
-                color = Color.argb(35, 39, 174, 96)
+                color = Color.argb(35, 74, 222, 128)
             }
             canvas.drawRect(gx, topCorridor, gx + gw, botCorridor, corridorPaint)
         }
@@ -419,7 +420,7 @@ class WidgetUpdateWorker(
         val dashPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
             strokeWidth = 1f * density
-            color = Color.argb(90, 39, 174, 96)
+            color = Color.argb(90, 74, 222, 128)
             pathEffect = DashPathEffect(floatArrayOf(5f * density, 5f * density), 0f)
         }
         if (yLo in gy..(gy + gh)) {
@@ -448,7 +449,7 @@ class WidgetUpdateWorker(
         val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
             strokeWidth = 1.5f * density
-            color = Color.argb(80, 200, 200, 200)
+            color = Color.argb(80, 148, 163, 184)
         }
         for (i in 0 until points.size - 1) {
             val p1 = points[i]
@@ -470,13 +471,13 @@ class WidgetUpdateWorker(
         val axisPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
             strokeWidth = 1f * density
-            color = Color.argb(40, 255, 255, 255)
+            color = Color.argb(60, 51, 65, 85)
         }
         canvas.drawLine(gx, axisY, gx + gw, axisY, axisPaint)
 
         // Axis labels
         val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.argb(160, 180, 180, 180)
+            color = Color.argb(180, 148, 163, 184)
             textSize = 9f * density
         }
         canvas.drawText("-4ч", gx, axisY + 11f * density, textPaint)
