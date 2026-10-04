@@ -14,7 +14,7 @@ namespace XDripWidget
         private bool _isLoading;
 
         private readonly Typeface _typefaceBig = new Typeface(new FontFamily("Segoe UI"), FontStyles.Normal, FontWeights.Bold, FontStretches.Normal);
-        private readonly Typeface _typefaceMed = new Typeface(new FontFamily("Segoe UI"), FontStyles.Normal, FontWeights.Normal, FontStretches.Normal);
+        private readonly Typeface _typefaceMed = new Typeface(new FontFamily("Segoe UI"), FontStyles.Normal, FontWeights.SemiBold, FontStretches.Normal);
         private readonly Typeface _typefaceSml = new Typeface(new FontFamily("Segoe UI"), FontStyles.Normal, FontWeights.Normal, FontStretches.Normal);
 
         public GlucoseCanvas()
@@ -64,9 +64,9 @@ namespace XDripWidget
             if (!string.IsNullOrEmpty(_errorMessage) || _data == null)
             {
                 DrawTopLine(dc, Constants.ColorVeryLow, w);
-                DrawCenteredText(dc, "📡❌", 18, Constants.ColorVeryLow, w, 24);
-                DrawCenteredText(dc, _errorMessage ?? "Нет связи с сервером", 11, Constants.ColorVeryLow, w, 52);
-                DrawCenteredText(dc, "Проверьте интернет или адрес", 9, Constants.ColorGray, w, 78);
+                DrawCenteredText(dc, "📡❌", 18, Constants.ColorVeryLow, w, 22);
+                DrawCenteredText(dc, _errorMessage ?? "Нет связи с сервером", 11, Constants.ColorVeryLow, w, 50);
+                DrawCenteredText(dc, "Проверьте интернет или адрес", 9, Constants.ColorGray, w, 76);
                 return;
             }
 
@@ -76,25 +76,26 @@ namespace XDripWidget
             // Top accent line
             DrawTopLine(dc, statusColor, w);
 
-            // Glucose + Arrow (Right aligned)
+            // Glucose + Arrow (Right aligned, e.g. "5.9 ↗")
             string arrow = Constants.GetTrendArrow(_data.Direction);
-            string glucoseText = string.Format("{0:F1} {1}", _data.Mmol, arrow);
-            var glucoseFt = CreateFormattedText(glucoseText, _typefaceBig, 28, statusColor);
+            string glucoseText = string.Format(CultureInfo.InvariantCulture, "{0:F1} {1}", _data.Mmol, arrow);
+            var glucoseFt = CreateFormattedText(glucoseText, _typefaceBig, 32, statusColor);
             dc.DrawText(glucoseFt, new Point(w - glucoseFt.Width - 10, 8));
 
-            // Delta (Left aligned)
+            // Delta (Left aligned, e.g. "Δ +0.4")
             string deltaIcon = _data.MinutesAgo > 1 ? "🔄" : "Δ";
             string deltaText = string.Format("{0} {1}", deltaIcon, _data.Delta);
-            var deltaFt = CreateFormattedText(deltaText, _typefaceMed, 13, Constants.ColorSub);
+            var deltaFt = CreateFormattedText(deltaText, _typefaceMed, 14, Constants.ColorSub);
             dc.DrawText(deltaFt, new Point(10, 16));
 
-            // Battery bar & Time ago
+            // Battery bar
             DrawBatteryBar(dc, _data.Battery, _data.IsStale);
 
+            // Time ago (e.g. "1 м назад")
             string timeText = Constants.FormatTimeAgo(_data.MinutesAgo);
             Color timeColor = _data.IsStale ? Constants.ColorGray : Constants.ColorSub;
-            var timeFt = CreateFormattedText(timeText, _typefaceSml, 10, timeColor);
-            dc.DrawText(timeFt, new Point(w - timeFt.Width - 12, 54));
+            var timeFt = CreateFormattedText(timeText, _typefaceSml, 11, timeColor);
+            dc.DrawText(timeFt, new Point(w - timeFt.Width - 10, 52));
 
             // 4-Hour Sparkline graph
             DrawSparkline(dc, w);
@@ -109,9 +110,9 @@ namespace XDripWidget
         private void DrawBatteryBar(DrawingContext dc, int pct, bool stale)
         {
             const double barX = 10;
-            const double barY = 56;
+            const double barY = 53;
             const double barW = 34;
-            const double barH = 12;
+            const double barH = 13;
             const double capW = 3;
             const double capH = 6;
 
@@ -135,7 +136,7 @@ namespace XDripWidget
 
             // Label
             string label = pct >= 0 ? string.Format("{0}%", pct) : "—";
-            var pctFt = CreateFormattedText(label, _typefaceSml, 9, bColor);
+            var pctFt = CreateFormattedText(label, _typefaceSml, 10, bColor);
             dc.DrawText(pctFt, new Point(capX + capW + 4, barY));
         }
 
@@ -144,7 +145,7 @@ namespace XDripWidget
             if (_history == null || _history.Count < 2) return;
 
             const double gx = 10;
-            const double gy = 78;
+            const double gy = 74;
             double gw = Math.Max(100, w - 20);
             const double gh = 42;
 
@@ -167,7 +168,7 @@ namespace XDripWidget
             double botCorridor = Math.Max(gy, Math.Min(gy + gh, yLo));
             if (botCorridor > topCorridor)
             {
-                var corridorBrush = new SolidColorBrush(Color.FromArgb(35, 74, 222, 128));
+                var corridorBrush = new SolidColorBrush(Color.FromArgb(30, 74, 222, 128)); // #4ADE80
                 dc.DrawRectangle(corridorBrush, null, new Rect(gx, topCorridor, gw, botCorridor - topCorridor));
             }
 
@@ -191,7 +192,7 @@ namespace XDripWidget
             }
 
             // Connecting lines
-            var linePen = new Pen(new SolidColorBrush(Color.FromArgb(90, 148, 163, 184)), 1.2);
+            var linePen = new Pen(new SolidColorBrush(Color.FromArgb(120, 74, 222, 128)), 1.4);
             for (int i = 0; i < points.Count - 1; i++)
             {
                 dc.DrawLine(linePen, points[i].Item1, points[i + 1].Item1);
@@ -204,20 +205,25 @@ namespace XDripWidget
                 dc.DrawEllipse(dotBrush, null, pt.Item1, 2.5, 2.5);
             }
 
-            // Time axis
+            // Time axis line
             double axisY = gy + gh + 4;
-            var axisPen = new Pen(new SolidColorBrush(Color.FromArgb(120, 51, 65, 85)), 1.0);
+            var axisPen = new Pen(new SolidColorBrush(Color.FromArgb(100, 51, 65, 85)), 1.0);
             dc.DrawLine(axisPen, new Point(gx, axisY), new Point(gx + gw, axisY));
 
+            // Tick marks
+            dc.DrawLine(axisPen, new Point(gx, axisY), new Point(gx, axisY + 2));
+            dc.DrawLine(axisPen, new Point(gx + gw / 2.0, axisY), new Point(gx + gw / 2.0, axisY + 2));
+            dc.DrawLine(axisPen, new Point(gx + gw, axisY), new Point(gx + gw, axisY + 2));
+
             // Time labels
-            var timeBrush = new SolidColorBrush(Color.FromArgb(180, 148, 163, 184));
-            var ftStart = CreateFormattedText("-4ч", _typefaceSml, 9, timeBrush);
+            var timeBrush = new SolidColorBrush(Color.FromArgb(160, 148, 163, 184));
+            var ftStart = CreateFormattedText("-4ч", _typefaceSml, 9.5, timeBrush);
             dc.DrawText(ftStart, new Point(gx, axisY + 2));
 
-            var ftMid = CreateFormattedText("-2ч", _typefaceSml, 9, timeBrush);
+            var ftMid = CreateFormattedText("-2ч", _typefaceSml, 9.5, timeBrush);
             dc.DrawText(ftMid, new Point(gx + gw / 2.0 - ftMid.Width / 2.0, axisY + 2));
 
-            var ftEnd = CreateFormattedText("сейчас", _typefaceSml, 9, timeBrush);
+            var ftEnd = CreateFormattedText("сейчас", _typefaceSml, 9.5, timeBrush);
             dc.DrawText(ftEnd, new Point(gx + gw - ftEnd.Width, axisY + 2));
         }
 

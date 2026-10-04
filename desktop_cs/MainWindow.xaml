@@ -16,20 +16,66 @@
         Loaded="Window_Loaded"
         Closing="Window_Closing">
     <Window.Resources>
+        <!-- Custom ContextMenu Style (eliminates white gutter/column) -->
+        <Style TargetType="ContextMenu">
+            <Setter Property="SnapsToDevicePixels" Value="True"/>
+            <Setter Property="OverridesDefaultStyle" Value="True"/>
+            <Setter Property="Grid.IsSharedSizeScope" Value="True"/>
+            <Setter Property="HasDropShadow" Value="True"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ContextMenu">
+                        <Border Background="#1E293B" BorderBrush="#334155" BorderThickness="1" CornerRadius="8" Padding="4">
+                            <StackPanel IsItemsHost="True" KeyboardNavigation.DirectionalNavigation="Cycle"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Custom MenuItem Style (dark theme, Action Blue hover) -->
         <Style TargetType="MenuItem">
-            <Setter Property="Background" Value="#1E293B"/>
             <Setter Property="Foreground" Value="#F8FAFC"/>
             <Setter Property="FontSize" Value="13"/>
-            <Setter Property="Padding" Value="10,6"/>
+            <Setter Property="FontFamily" Value="Segoe UI"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="MenuItem">
+                        <Border x:Name="Border" Background="Transparent" CornerRadius="4" Padding="12,6,20,6" Margin="1">
+                            <ContentPresenter ContentSource="Header" HorizontalAlignment="Left" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsHighlighted" Value="True">
+                                <Setter TargetName="Border" Property="Background" Value="#0284C7"/>
+                                <Setter Property="Foreground" Value="#FFFFFF"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Custom Separator Style (1px dark slate line) -->
+        <Style TargetType="Separator">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Separator">
+                        <Border Height="1" Background="#334155" Margin="8,4"/>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
     </Window.Resources>
     <Window.ContextMenu>
-        <ContextMenu Background="#1E293B" Foreground="#F8FAFC" BorderBrush="#334155" BorderThickness="1">
+        <ContextMenu>
             <MenuItem Header="Обновить сейчас" Click="MenuRefresh_Click"/>
-            <Separator Background="#334155"/>
+            <MenuItem Header="Ввести данные терапии" Click="MenuTreatments_Click"/>
+            <MenuItem Header="История / Удаление терапий" Click="MenuHistory_Click"/>
             <MenuItem Header="Свернуть в трей" Click="MenuHide_Click"/>
+            <Separator/>
+            <MenuItem Header="Настройки…" Click="MenuSettings_Click"/>
             <MenuItem Header="О программе" Click="MenuAbout_Click"/>
-            <Separator Background="#334155"/>
+            <Separator/>
             <MenuItem Header="Выход" Click="MenuExit_Click"/>
         </ContextMenu>
     </Window.ContextMenu>

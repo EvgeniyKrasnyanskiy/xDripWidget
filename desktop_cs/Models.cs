@@ -35,6 +35,17 @@ namespace XDripWidget
         public double Mmol { get; set; }
     }
 
+    public class TreatmentItem
+    {
+        public string Id { get; set; }
+        public string EventType { get; set; }
+        public double Carbs { get; set; }
+        public double Insulin { get; set; }
+        public double Glucose { get; set; }
+        public string Notes { get; set; }
+        public DateTime Date { get; set; }
+    }
+
     public static class Constants
     {
         // Clinical AGP 6-band thresholds (mmol/L)
@@ -62,6 +73,12 @@ namespace XDripWidget
         public static readonly Color ColorSurface  = (Color)ColorConverter.ConvertFromString("#1E293B"); // Card Surface
         public static readonly Color ColorBorder   = (Color)ColorConverter.ConvertFromString("#334155"); // Border
         public static readonly Color ColorSub      = (Color)ColorConverter.ConvertFromString("#94A3B8"); // Sub text
+
+        // Treatments
+        public static readonly Color ColorInsulin  = (Color)ColorConverter.ConvertFromString("#0284C7"); // Action Blue
+        public static readonly Color ColorCarbs    = (Color)ColorConverter.ConvertFromString("#F59E0B"); // Amber
+        public static readonly Color ColorNote     = (Color)ColorConverter.ConvertFromString("#8B5CF6"); // Purple
+        public static readonly Color ColorGlucose  = (Color)ColorConverter.ConvertFromString("#10B981"); // Emerald
 
         private static readonly Dictionary<string, string> TrendArrows = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {

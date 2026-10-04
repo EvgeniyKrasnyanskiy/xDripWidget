@@ -239,14 +239,41 @@ namespace XDripWidget
             Hide();
         }
 
+        private void MenuTreatments_Click(object sender, RoutedEventArgs e)
+        {
+            var dlg = new TreatmentDialog(_apiClient, _config.ServerUrl, _config.ApiSecret);
+            dlg.Owner = this;
+            if (dlg.ShowDialog() == true)
+            {
+                FetchDataAsync();
+            }
+        }
+
+        private void MenuHistory_Click(object sender, RoutedEventArgs e)
+        {
+            var dlg = new TreatmentHistoryDialog(_apiClient, _config.ServerUrl, _config.ApiSecret);
+            dlg.Owner = this;
+            dlg.ShowDialog();
+        }
+
+        private void MenuSettings_Click(object sender, RoutedEventArgs e)
+        {
+            var dlg = new SettingsDialog(_config);
+            dlg.Owner = this;
+            if (dlg.ShowDialog() == true)
+            {
+                Opacity = Math.Max(0.3, Math.Min(1.0, (100 - _config.Transparency) / 100.0));
+                int interval = Math.Max(1, _config.RefreshIntervalMinutes);
+                _timer.Interval = TimeSpan.FromMinutes(interval);
+                FetchDataAsync();
+            }
+        }
+
         private void MenuAbout_Click(object sender, RoutedEventArgs e)
         {
-            MessageBox.Show(
-                "xDripWidget (C# .NET Edition)\nВерсия: 1.9.0\nРазмер: ~200 КБ\nАвтор: Evgeniy Krasnyanskiy",
-                "О программе",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information
-            );
+            var dlg = new AboutDialog();
+            dlg.Owner = this;
+            dlg.ShowDialog();
         }
 
         private void MenuExit_Click(object sender, RoutedEventArgs e)

@@ -122,6 +122,93 @@ namespace XDripWidget
             return result;
         }
 
+        public async Task<bool> SubmitTreatmentAsync(string baseUrl, string apiSecret, string eventType, double carbs, double insulin, double glucose, string notes, DateTime date)
+        {
+            if (string.IsNullOrWhiteSpace(baseUrl)) return false;
+            string cleanUrl = baseUrl.Trim().TrimEnd('/');
+            string tokenParam = string.IsNullOrWhiteSpace(apiSecret) ? "" : string.Format("?token={0}", Uri.EscapeDataString(apiSecret.Trim()));
+            string url = string.Format("{0}/api/v1/treatments{1}", cleanUrl, tokenParam);
+
+            var dict = new Dictionary<string, object>
+            {
+                { "uuid", Guid.NewGuid().ToString() },
+                { "_id", Guid.NewGuid().ToString() },
+                { "eventType", eventType },
+                { "carbs", carbs },
+                { "insulin", insulin },
+                { "glucose", glucose },
+                { "notes", notes ?? "" },
+                { "created_at", date.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ") },
+                { "date", (long)(date.ToUniversalTime() - new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)).TotalMilliseconds }
+            };
+
+            string json = _serializer.Serialize(dict);
+            using (var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json"))
+            {
+                var response = await _httpClient.PostAsync(url, content).ConfigureAwait(false);
+                return response.IsSuccessStatusCode;
+            }
+        }
+
+        public async Task<List<TreatmentItem>> GetTreatmentsAsync(string baseUrl, string apiSecret, int count = 50)
+        {
+            var list = new List<TreatmentItem>();
+            if (string.IsNullOrWhiteSpace(baseUrl)) return list;
+            string cleanUrl = baseUrl.Trim().TrimEnd('/');
+            string tokenParam = string.IsNullOrWhiteSpace(apiSecret) ? string.Format("?count={0}", count) : string.Format("?count={0}&token={1}", count, Uri.EscapeDataString(apiSecret.Trim()));
+            string url = string.Format("{0}/api/v1/treatments{1}", cleanUrl, tokenParam);
+
+            var response = await _httpClient.GetAsync(url).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode) return list;
+
+            string json = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+            var rawList = _serializer.Deserialize<ArrayList>(json);
+            if (rawList == null) return list;
+
+            foreach (var item in rawList)
+            {
+                var d = item as Dictionary<string, object>;
+                if (d == null) continue;
+
+                var t = new TreatmentItem
+                {
+                    Id = SafeString(d, "_id", SafeString(d, "uuid", "")),
+                    EventType = SafeString(d, "eventType", "Treatment"),
+                    Carbs = SafeDouble(d, "carbs", 0),
+                    Insulin = SafeDouble(d, "insulin", 0),
+                    Glucose = SafeDouble(d, "glucose", 0),
+                    Notes = SafeString(d, "notes", "")
+                };
+
+                long ms = SafeLong(d, "date", 0);
+                if (ms > 0)
+                {
+                    t.Date = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc).AddMilliseconds(ms).ToLocalTime();
+                }
+                else
+                {
+                    string ca = SafeString(d, "created_at", "");
+                    DateTime dt;
+                    if (DateTime.TryParse(ca, out dt)) t.Date = dt.ToLocalTime();
+                    else t.Date = DateTime.Now;
+                }
+
+                list.Add(t);
+            }
+            return list;
+        }
+
+        public async Task<bool> DeleteTreatmentAsync(string baseUrl, string apiSecret, string id)
+        {
+            if (string.IsNullOrWhiteSpace(baseUrl) || string.IsNullOrWhiteSpace(id)) return false;
+            string cleanUrl = baseUrl.Trim().TrimEnd('/');
+            string tokenParam = string.IsNullOrWhiteSpace(apiSecret) ? "" : string.Format("?token={0}", Uri.EscapeDataString(apiSecret.Trim()));
+            string url = string.Format("{0}/api/v1/treatments/{1}{2}", cleanUrl, id, tokenParam);
+
+            var response = await _httpClient.DeleteAsync(url).ConfigureAwait(false);
+            return response.IsSuccessStatusCode;
+        }
+
         private CurrentGlucoseData ParseCurrentData(Dictionary<string, object> d)
         {
             var data = new CurrentGlucoseData
@@ -141,8 +228,15 @@ namespace XDripWidget
             object v;
             if (d.TryGetValue(key, out v) && v != null)
             {
+                if (v is double) return (double)v;
+                if (v is float) return (double)(float)v;
+                if (v is decimal) return (double)(decimal)v;
+                if (v is int) return (double)(int)v;
+                if (v is long) return (double)(long)v;
+
+                string s = v.ToString().Trim().Replace(',', '.');
                 double res;
-                if (double.TryParse(v.ToString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out res))
+                if (double.TryParse(s, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out res))
                 {
                     return res;
                 }
@@ -155,6 +249,10 @@ namespace XDripWidget
             object v;
             if (d.TryGetValue(key, out v) && v != null)
             {
+                if (v is int) return (int)v;
+                if (v is long) return (int)(long)v;
+                if (v is double) return (int)(double)v;
+                if (v is decimal) return (int)(decimal)v;
                 int res;
                 if (int.TryParse(v.ToString(), out res)) return res;
             }
@@ -166,6 +264,10 @@ namespace XDripWidget
             object v;
             if (d.TryGetValue(key, out v) && v != null)
             {
+                if (v is long) return (long)v;
+                if (v is int) return (int)v;
+                if (v is double) return (long)(double)v;
+                if (v is decimal) return (long)(decimal)v;
                 long res;
                 if (long.TryParse(v.ToString(), out res)) return res;
             }
