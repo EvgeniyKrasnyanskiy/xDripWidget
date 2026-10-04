@@ -31,7 +31,7 @@ import urllib.error
 import urllib.request
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 from PyQt6.QtCore import (
     QDateTime,
@@ -48,6 +48,7 @@ from PyQt6.QtGui import (
     QAction,
     QBrush,
     QColor,
+    QContextMenuEvent,
     QFont,
     QIcon,
     QPainter,
@@ -112,14 +113,49 @@ if not logger.handlers:
         file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
 
-        console_handler = logging.StreamHandler()
-        console_handler.setFormatter(formatter)
-        logger.addHandler(console_handler)
+        if sys.stdout is not None and hasattr(sys.stdout, "write"):
+            console_handler = logging.StreamHandler(sys.stdout)
+            console_handler.setFormatter(formatter)
+            logger.addHandler(console_handler)
     except Exception as exc:
         print(f"Failed to initialize log file handler: {exc}")
 
 apply_log_level("INFO")
 logger.info("=================== xDrip Widget Initializing ===================")
+
+
+def global_excepthook(exc_type, exc_value, exc_traceback):
+    if issubclass(exc_type, KeyboardInterrupt):
+        sys.__excepthook__(exc_type, exc_value, exc_traceback)
+        return
+    logger.critical("Unhandled top-level exception:", exc_info=(exc_type, exc_value, exc_traceback))
+
+
+sys.excepthook = global_excepthook
+
+
+def safe_float(val: Any, default: float = 0.0) -> float:
+    if val is None:
+        return default
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return default
+
+
+def safe_int(val: Any, default: int = 0) -> int:
+    if val is None:
+        return default
+    try:
+        return int(float(val))
+    except (ValueError, TypeError):
+        return default
+
+
+def safe_str(val: Any, default: str = "") -> str:
+    if val is None:
+        return default
+    return str(val)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -227,39 +263,42 @@ def get_window_opacity(s: QSettings) -> float:
     return (100 - t) / 100.0
 
 
-def glucose_color(mmol: float, stale: bool) -> QColor:
-    if stale or mmol <= 0.0:
+def glucose_color(mmol: Any, stale: bool = False) -> QColor:
+    v = safe_float(mmol, 0.0)
+    if stale or v <= 0.0:
         return COLOR_GRAY
-    if mmol < HYPO_SEVERE:
+    if v < HYPO_SEVERE:
         return COLOR_VERY_LOW
-    if mmol < HYPO_MILD:
+    if v < HYPO_MILD:
         return COLOR_LOW
-    if mmol <= HYPER_TIGHT:
+    if v <= HYPER_TIGHT:
         return COLOR_TIGHT
-    if mmol <= HYPER_TARGET:
+    if v <= HYPER_TARGET:
         return COLOR_TARGET
-    if mmol <= HYPER_SEVERE:
+    if v <= HYPER_SEVERE:
         return COLOR_HIGH
     return COLOR_VERY_HIGH
 
 
-def format_time_ago(minutes_ago: int) -> str:
-    if minutes_ago < 60:
-        return f"{minutes_ago} м назад"
-    elif minutes_ago < 1440:
-        hours = minutes_ago // 60
+def format_time_ago(minutes_ago: Any) -> str:
+    m = safe_int(minutes_ago, 0)
+    if m < 60:
+        return f"{m} м назад"
+    elif m < 1440:
+        hours = m // 60
         return f"{hours} ч назад"
     else:
-        days = minutes_ago // 1440
+        days = m // 1440
         return f"{days} д назад"
 
 
-def battery_color(pct: int) -> QColor:
-    if pct < 0:
+def battery_color(pct: Any) -> QColor:
+    p = safe_int(pct, -1)
+    if p < 0:
         return COLOR_GRAY
-    if pct <= 20:
+    if p <= 20:
         return COLOR_VERY_LOW
-    if pct <= 50:
+    if p <= 50:
         return COLOR_LOW
     return COLOR_TARGET
 
@@ -1431,17 +1470,9 @@ class GlucoseWidget(QWidget):
     def _fetch(self):
         logger.debug("_fetch() invoked")
 
-        if self._worker is not None:
-            if self._worker.isRunning():
-                logger.debug("_fetch(): previous worker is still running, cancelling it")
-                self._worker.cancel()
-                try:
-                    self._worker.data_ready.disconnect()
-                    self._worker.fetch_error.disconnect()
-                except Exception:
-                    pass
-                self._worker.wait(100)
-            self._worker = None
+        if self._worker is not None and self._worker.isRunning():
+            logger.debug("_fetch(): worker is already running, skipping redundant trigger")
+            return
 
         s      = get_settings()
         url    = str(s.value("server_url", DEFAULT_URL))
@@ -1450,46 +1481,60 @@ class GlucoseWidget(QWidget):
         worker = FetchWorker(url, secret)
         worker.data_ready.connect(self._on_data)
         worker.fetch_error.connect(self._on_error)
+        worker.finished.connect(worker.deleteLater)
         worker.finished.connect(self._on_fetch_worker_finished)
         self._worker = worker
         worker.start()
 
     def _on_fetch_worker_finished(self):
         logger.debug("_on_fetch_worker_finished")
-        if self._worker is not None:
-            w = self._worker
+        if self._worker is self.sender():
             self._worker = None
-            w.deleteLater()
 
     def _on_data(self, data: dict, history: list):
+        if not isinstance(data, dict):
+            logger.warning(f"_on_data received non-dict: {type(data)}")
+            return
         logger.debug(f"_on_data received: mmol={data.get('mmol')}")
         self._data    = data
-        self._history = history
+        self._history = history if isinstance(history, list) else []
         self._error   = None
-        self._check_alerts(data)
+        try:
+            self._check_alerts(data)
+        except Exception as exc:
+            logger.error(f"_check_alerts error: {exc}")
         self.update()
 
-        mmol = data.get("mmol", 0.0)
-        minutes_ago = data.get("minutes_ago", 999)
+        mmol = safe_float(data.get("mmol"), 0.0)
+        minutes_ago = safe_int(data.get("minutes_ago"), 999)
         stale = minutes_ago > STALE_MINUTES
         color = glucose_color(mmol, stale)
-        self._update_tray_icon(color)
-        self._update_tray_tooltip()
+        try:
+            self._update_tray_icon(color)
+            self._update_tray_tooltip()
+        except Exception as exc:
+            logger.error(f"Tray update error: {exc}")
 
     def _on_error(self, msg: str):
         logger.warning(f"_on_error: {msg}")
         self._error = msg
-        self._update_tray_icon(COLOR_GRAY)
+        try:
+            self._update_tray_icon(COLOR_GRAY)
+        except Exception:
+            pass
         self.update()
 
     # ------------------------------------------------------------------
     # Glucose alerts
     # ------------------------------------------------------------------
     def _check_alerts(self, data: dict):
-        mmol: float      = data.get("mmol", 0.0)
-        minutes_ago: int = data.get("minutes_ago", 999)
+        if not self._tray or not self._tray.isVisible():
+            return
 
-        if minutes_ago > STALE_MINUTES:
+        mmol: float      = safe_float(data.get("mmol"), 0.0)
+        minutes_ago: int = safe_int(data.get("minutes_ago"), 999)
+
+        if minutes_ago > STALE_MINUTES or mmol <= 0.0:
             return
 
         now = time.time()
@@ -1497,30 +1542,33 @@ class GlucoseWidget(QWidget):
         def can_alert(key: str) -> bool:
             return (now - self._last_alerts.get(key, 0.0)) >= ALERT_COOLDOWN_S
 
-        if mmol > ALERT_CRITICAL and can_alert("critical"):
-            self._last_alerts["critical"] = now
-            logger.info(f"Triggering critical alert: {mmol:.1f}")
-            self._tray.showMessage(
-                "⛔ Критически высокий сахар!",
-                f"{mmol:.1f} ммоль/л — немедленно примите меры!",
-                QSystemTrayIcon.MessageIcon.Critical, 12_000,
-            )
-        elif mmol > ALERT_HYPER and can_alert("hyper"):
-            self._last_alerts["hyper"] = now
-            logger.info(f"Triggering hyper alert: {mmol:.1f}")
-            self._tray.showMessage(
-                "🟡 Высокий сахар",
-                f"{mmol:.1f} ммоль/л — выше нормы.",
-                QSystemTrayIcon.MessageIcon.Warning, 8_000,
-            )
-        elif mmol < ALERT_HYPO and can_alert("hypo"):
-            self._last_alerts["hypo"] = now
-            logger.info(f"Triggering hypo alert: {mmol:.1f}")
-            self._tray.showMessage(
-                "🔴 Низкий сахар!",
-                f"{mmol:.1f} ммоль/л — опасная гипогликемия!",
-                QSystemTrayIcon.MessageIcon.Critical, 12_000,
-            )
+        try:
+            if mmol > ALERT_CRITICAL and can_alert("critical"):
+                self._last_alerts["critical"] = now
+                logger.info(f"Triggering critical alert: {mmol:.1f}")
+                self._tray.showMessage(
+                    "⛔ Критически высокий сахар!",
+                    f"{mmol:.1f} ммоль/л — немедленно примите меры!",
+                    QSystemTrayIcon.MessageIcon.Critical, 12_000,
+                )
+            elif mmol > ALERT_HYPER and can_alert("hyper"):
+                self._last_alerts["hyper"] = now
+                logger.info(f"Triggering hyper alert: {mmol:.1f}")
+                self._tray.showMessage(
+                    "🟡 Высокий сахар",
+                    f"{mmol:.1f} ммоль/л — выше нормы.",
+                    QSystemTrayIcon.MessageIcon.Warning, 8_000,
+                )
+            elif mmol < ALERT_HYPO and can_alert("hypo"):
+                self._last_alerts["hypo"] = now
+                logger.info(f"Triggering hypo alert: {mmol:.1f}")
+                self._tray.showMessage(
+                    "🔴 Низкий сахар!",
+                    f"{mmol:.1f} ммоль/л — опасная гипогликемия!",
+                    QSystemTrayIcon.MessageIcon.Critical, 12_000,
+                )
+        except Exception as exc:
+            logger.warning(f"Failed to show tray notification: {exc}")
 
     # ------------------------------------------------------------------
     # GitHub Updates
@@ -1528,12 +1576,9 @@ class GlucoseWidget(QWidget):
     def _check_updates(self, interactive: bool = False):
         logger.debug(f"_check_updates(interactive={interactive})")
 
-        if self._update_worker is not None:
-            if self._update_worker.isRunning():
-                logger.debug("_check_updates: update worker is already running")
-                return
-            else:
-                self._update_worker = None
+        if self._update_worker is not None and self._update_worker.isRunning():
+            logger.debug("_check_updates: update worker is already running")
+            return
 
         worker = UpdateCheckerWorker(APP_VERSION)
         worker.update_result.connect(
@@ -1546,16 +1591,15 @@ class GlucoseWidget(QWidget):
                     f"Не удалось проверить обновления:\n{err}"
                 )
             )
+        worker.finished.connect(worker.deleteLater)
         worker.finished.connect(self._on_update_worker_finished)
         self._update_worker = worker
         worker.start()
 
     def _on_update_worker_finished(self):
         logger.debug("_on_update_worker_finished")
-        if self._update_worker is not None:
-            w = self._update_worker
+        if self._update_worker is self.sender():
             self._update_worker = None
-            w.deleteLater()
 
     def _on_update_result(self, has_update: bool, tag: str, body: str, url: str, interactive: bool):
         logger.info(f"Update check result: has_update={has_update}, tag={tag}")
@@ -1579,105 +1623,122 @@ class GlucoseWidget(QWidget):
     # Painting
     # ------------------------------------------------------------------
     def paintEvent(self, _event):
+        try:
+            self._render_widget()
+        except Exception as exc:
+            logger.error(f"Error inside paintEvent: {exc}", exc_info=True)
+            try:
+                painter = QPainter(self)
+                painter.fillRect(self.rect(), COLOR_BG)
+                painter.setPen(COLOR_SOFT_RED)
+                painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "Ошибка отрисовки")
+                painter.end()
+            except Exception:
+                pass
+
+    def _render_widget(self):
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        try:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        path = QPainterPath()
-        path.addRoundedRect(0, 0, self.width(), self.height(), 14, 14)
-        painter.fillPath(path, COLOR_BG)
+            path = QPainterPath()
+            path.addRoundedRect(0, 0, self.width(), self.height(), 14, 14)
+            painter.fillPath(path, COLOR_BG)
 
-        if self._error or not self._data:
-            top_color = COLOR_SOFT_RED if self._error else COLOR_GRAY
-            painter.setPen(QPen(top_color, 2))
-            painter.drawLine(14, 2, self.width() - 14, 2)
+            if self._error or not self._data:
+                top_color = COLOR_SOFT_RED if self._error else COLOR_GRAY
+                painter.setPen(QPen(top_color, 2))
+                painter.drawLine(14, 2, self.width() - 14, 2)
 
-            if not self._data and not self._error:
-                painter.setPen(COLOR_SUB)
-                painter.setFont(self._font_med)
+                if not self._data and not self._error:
+                    painter.setPen(COLOR_SUB)
+                    painter.setFont(self._font_med)
+                    painter.drawText(
+                        0, 0, self.width(), self.height(),
+                        Qt.AlignmentFlag.AlignCenter,
+                        "Загрузка…",
+                    )
+                    return
+
+                err_title = self._error or "Нет связи с сервером"
+
+                # Status Icon
+                painter.setPen(COLOR_SOFT_RED)
+                painter.setFont(QFont("Segoe UI", 16))
                 painter.drawText(
-                    0, 0, self.width(), self.height(),
+                    0, 16, self.width(), 28,
                     Qt.AlignmentFlag.AlignCenter,
-                    "Загрузка…",
+                    "📡❌",
+                )
+
+                # Error Title
+                painter.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+                painter.drawText(
+                    8, 48, self.width() - 16, 24,
+                    Qt.AlignmentFlag.AlignCenter,
+                    err_title,
+                )
+
+                # Subtitle / Hint with word wrap
+                painter.setPen(COLOR_GRAY)
+                painter.setFont(self._font_sml)
+                painter.drawText(
+                    12, 74, self.width() - 24, 60,
+                    Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap,
+                    "Проверьте интернет-соединение или адрес сервера",
                 )
                 return
 
-            err_title = self._error or "Нет связи с сервером"
+            d = self._data
+            mmol: float       = safe_float(d.get("mmol"), 0.0)
+            direction: str    = safe_str(d.get("direction"), "Unknown")
+            delta: str        = safe_str(d.get("delta"), "?")
+            battery: int      = safe_int(d.get("battery"), -1)
+            minutes_ago: int  = safe_int(d.get("minutes_ago"), 0)
 
-            # Status Icon
-            painter.setPen(COLOR_SOFT_RED)
-            painter.setFont(QFont("Segoe UI", 16))
+            stale = minutes_ago > STALE_MINUTES
+            color = glucose_color(mmol, stale)
+            arrow = TREND_ARROWS.get(direction, "?")
+
+            # ── Glucose + arrow ───────────────────────────────────────────
+            painter.setPen(color)
+            painter.setFont(self._font_big)
             painter.drawText(
-                0, 16, self.width(), 28,
-                Qt.AlignmentFlag.AlignCenter,
-                "📡❌",
+                0, 4, self.width() - 8, 48,
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                f"{mmol:.1f} {arrow}",
             )
 
-            # Error Title
-            painter.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+            # ── Delta ─────────────────────────────────────────────────────
+            painter.setPen(COLOR_SUB)
+            painter.setFont(self._font_med)
+            icon_symbol = "🔄" if minutes_ago > 1 else "Δ"
             painter.drawText(
-                8, 48, self.width() - 16, 24,
-                Qt.AlignmentFlag.AlignCenter,
-                err_title,
+                8, 4, 80, 48,
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                f"{icon_symbol} {delta}",
             )
 
-            # Subtitle / Hint with word wrap
-            painter.setPen(COLOR_GRAY)
+            # ── Battery & Time ───────────────────────────────────────────
+            self._draw_battery_bar(painter, battery, stale)
+
+            time_color = COLOR_GRAY if stale else COLOR_SUB
+            painter.setPen(time_color)
             painter.setFont(self._font_sml)
             painter.drawText(
-                12, 74, self.width() - 24, 60,
-                Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap,
-                "Проверьте интернет-соединение или адрес сервера",
+                130, 50, 84, 25,
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                format_time_ago(minutes_ago),
             )
-            return
 
-        d = self._data
-        mmol: float       = d.get("mmol", 0.0)
-        direction: str    = d.get("direction", "Unknown")
-        delta: str        = d.get("delta", "?")
-        battery: int      = d.get("battery", -1)
-        minutes_ago: int  = d.get("minutes_ago", 0)
+            # ── Top accent line ───────────────────────────────────────────
+            painter.setPen(QPen(color, 2))
+            painter.drawLine(14, 2, self.width() - 14, 2)
 
-        stale = minutes_ago > STALE_MINUTES
-        color = glucose_color(mmol, stale)
-        arrow = TREND_ARROWS.get(direction, "?")
-
-        # ── Glucose + arrow ───────────────────────────────────────────
-        painter.setPen(color)
-        painter.setFont(self._font_big)
-        painter.drawText(
-            0, 4, self.width() - 8, 48,
-            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
-            f"{mmol:.1f} {arrow}",
-        )
-
-        # ── Delta ─────────────────────────────────────────────────────
-        painter.setPen(COLOR_SUB)
-        painter.setFont(self._font_med)
-        icon_symbol = "🔄" if minutes_ago > 1 else "Δ"
-        painter.drawText(
-            8, 4, 80, 48,
-            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-            f"{icon_symbol} {delta}",
-        )
-
-        # ── Battery & Time ───────────────────────────────────────────
-        self._draw_battery_bar(painter, battery, stale)
-
-        time_color = COLOR_GRAY if stale else COLOR_SUB
-        painter.setPen(time_color)
-        painter.setFont(self._font_sml)
-        painter.drawText(
-            130, 50, 84, 25,
-            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
-            format_time_ago(minutes_ago),
-        )
-
-        # ── Top accent line ───────────────────────────────────────────
-        painter.setPen(QPen(color, 2))
-        painter.drawLine(14, 2, self.width() - 14, 2)
-
-        # ── 4-hour trend sparkline ────────────────────────────────────
-        self._draw_sparkline(painter)
+            # ── 4-hour trend sparkline ────────────────────────────────────
+            self._draw_sparkline(painter)
+        finally:
+            painter.end()
 
     def _draw_battery_bar(self, painter: QPainter, pct: int, stale: bool):
         BAR_X, BAR_Y = 6,  54
@@ -1685,6 +1746,7 @@ class GlucoseWidget(QWidget):
         CAP_W, CAP_H = 4,   6
         RADIUS = 2
 
+        pct = safe_int(pct, -1)
         b_color = COLOR_GRAY if (pct < 0 or stale) else battery_color(pct)
 
         painter.setPen(QPen(COLOR_BORDER, 1))
@@ -1726,10 +1788,21 @@ class GlucoseWidget(QWidget):
         GW = max(100, self.width() - 20)
         GH = 42
 
+        valid_records = []
+        for r in self._history:
+            if not isinstance(r, dict):
+                continue
+            v = safe_float(r.get("mmol"), -1.0)
+            if v > 0.0:
+                ts = safe_int(r.get("timestamp"), 0)
+                valid_records.append((ts, v))
+
+        if len(valid_records) < 2:
+            return
+
         min_val = 2.5
         max_val = 14.0
-        for r in self._history:
-            v = float(r.get("mmol", 5.5))
+        for _, v in valid_records:
             if v < min_val:
                 min_val = max(1.5, v - 0.5)
             if v > max_val:
@@ -1758,14 +1831,12 @@ class GlucoseWidget(QWidget):
         if GY <= y_hi <= GY + GH:
             painter.drawLine(GX, int(y_hi), GX + GW, int(y_hi))
 
-        t_start = self._history[0].get("timestamp", 0)
-        t_end   = self._history[-1].get("timestamp", t_start)
+        t_start = valid_records[0][0]
+        t_end   = valid_records[-1][0]
         t_span  = max(1, t_end - t_start)
 
         points = []
-        for r in self._history:
-            ts = r.get("timestamp", t_start)
-            v  = float(r.get("mmol", 5.5))
+        for ts, v in valid_records:
             px = GX + int((ts - t_start) / t_span * GW)
             py = int(val_to_y(v))
             dot_color = glucose_color(v, stale=False)
@@ -1818,80 +1889,99 @@ class GlucoseWidget(QWidget):
         if event.button() == Qt.MouseButton.LeftButton:
             self._drag_pos = event.globalPosition().toPoint() - self.pos()
             self._drag_start_pos = event.globalPosition().toPoint()
-        elif event.button() == Qt.MouseButton.RightButton:
-            self._show_context_menu(event.globalPosition().toPoint())
+            event.accept()
+        else:
+            super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
-        if self._drag_pos and event.buttons() == Qt.MouseButton.LeftButton:
+        if self._drag_pos and (event.buttons() & Qt.MouseButton.LeftButton):
             self.move(event.globalPosition().toPoint() - self._drag_pos)
+            event.accept()
+        else:
+            super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton and self._drag_start_pos is not None:
-            delta = (event.globalPosition().toPoint() - self._drag_start_pos).manhattanLength()
-            if delta < 5:
-                logger.debug("LMB click detected -> refreshing data")
-                self._fetch()
+        if event.button() == Qt.MouseButton.LeftButton:
+            if self._drag_start_pos is not None:
+                delta = (event.globalPosition().toPoint() - self._drag_start_pos).manhattanLength()
+                if delta < 5:
+                    logger.debug("LMB click detected -> refreshing data")
+                    self._fetch()
+            self._drag_pos = None
+            self._drag_start_pos = None
+            try:
+                s = get_settings()
+                s.setValue("position", self.pos())
+                s.sync()
+            except Exception as e:
+                logger.error(f"Error saving widget position: {e}")
+            event.accept()
+        else:
+            super().mouseReleaseEvent(event)
+
+    def contextMenuEvent(self, event: QContextMenuEvent):
+        # Reset any leftover dragging state immediately on right-click context menu
         self._drag_pos = None
         self._drag_start_pos = None
-        try:
-            s = get_settings()
-            s.setValue("position", self.pos())
-            s.sync()
-        except Exception as e:
-            logger.error(f"Error saving widget position: {e}")
+        self._show_context_menu(event.globalPos())
+        event.accept()
 
     # ------------------------------------------------------------------
     # Context menu
     # ------------------------------------------------------------------
     def _show_context_menu(self, global_pos: QPoint):
-        menu = QMenu(self)
-        menu.setWindowFlags(menu.windowFlags() | Qt.WindowType.FramelessWindowHint)
-        menu.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        menu.setStyleSheet("""
-            QMenu {
-                background-color: #1E293B;
-                color: #F8FAFC;
-                border: 1px solid #334155;
-                border-radius: 8px;
-                padding: 4px;
-            }
-            QMenu::item {
-                padding: 6px 20px 6px 12px;
-                border-radius: 4px;
-                font-size: 13px;
-            }
-            QMenu::item:selected {
-                background-color: #0284C7;
-                color: #FFFFFF;
-            }
-            QMenu::separator {
-                height: 1px;
-                background-color: #334155;
-                margin: 4px 8px;
-            }
-        """)
+        try:
+            menu = QMenu(self)
+            menu.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+            menu.setWindowFlags(menu.windowFlags() | Qt.WindowType.FramelessWindowHint)
+            menu.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+            menu.setStyleSheet("""
+                QMenu {
+                    background-color: #1E293B;
+                    color: #F8FAFC;
+                    border: 1px solid #334155;
+                    border-radius: 8px;
+                    padding: 4px;
+                }
+                QMenu::item {
+                    padding: 6px 20px 6px 12px;
+                    border-radius: 4px;
+                    font-size: 13px;
+                }
+                QMenu::item:selected {
+                    background-color: #0284C7;
+                    color: #FFFFFF;
+                }
+                QMenu::separator {
+                    height: 1px;
+                    background-color: #334155;
+                    margin: 4px 8px;
+                }
+            """)
 
-        entries = [
-            ("Обновить сейчас",            self._fetch),
-            ("Ввести данные терапии",      self._open_treatments),
-            ("История / Удаление терапий", self._open_treatment_history),
-            ("Свернуть в трей",            self._hide_to_tray),
-            None,
-            ("Настройки…",                 self._open_settings),
-            ("О программе",                self._open_about),
-            None,
-            ("Выход",                      self._confirm_and_quit),
-        ]
-        for item in entries:
-            if item is None:
-                menu.addSeparator()
-            else:
-                label, slot = item
-                a = QAction(label, self)
-                a.triggered.connect(slot)
-                menu.addAction(a)
+            entries = [
+                ("Обновить сейчас",            self._fetch),
+                ("Ввести данные терапии",      self._open_treatments),
+                ("История / Удаление терапий", self._open_treatment_history),
+                ("Свернуть в трей",            self._hide_to_tray),
+                None,
+                ("Настройки…",                 self._open_settings),
+                ("О программе",                self._open_about),
+                None,
+                ("Выход",                      self._confirm_and_quit),
+            ]
+            for item in entries:
+                if item is None:
+                    menu.addSeparator()
+                else:
+                    label, slot = item
+                    a = QAction(label, menu)
+                    a.triggered.connect(slot)
+                    menu.addAction(a)
 
-        menu.exec(global_pos)
+            menu.exec(global_pos)
+        except Exception as exc:
+            logger.error(f"Error displaying context menu: {exc}", exc_info=True)
 
     # ------------------------------------------------------------------
     # Helpers
@@ -1950,19 +2040,33 @@ class GlucoseWidget(QWidget):
         if reply == QMessageBox.StandardButton.Yes:
             logger.info("User confirmed application exit")
             self._is_quitting = True
+            if self._worker is not None and self._worker.isRunning():
+                self._worker.cancel()
+                self._worker.wait(1000)
+            if self._update_worker is not None and self._update_worker.isRunning():
+                self._update_worker.wait(1000)
             QApplication.quit()
 
     def _update_tray_tooltip(self):
         if not self._data:
             return
         d = self._data
-        tip = (f"{d.get('mmol', '?')} ммоль/л  "
-               f"{TREND_ARROWS.get(d.get('direction', ''), '?')}  "
-               f"{d.get('minutes_ago', '?')}м назад")
-        self._tray.setToolTip(f"{APP_NAME}\n{tip}")
+        mmol = safe_float(d.get("mmol"), 0.0)
+        direction = safe_str(d.get("direction"), "")
+        minutes_ago = safe_int(d.get("minutes_ago"), 0)
+        tip = (f"{mmol:.1f} ммоль/л  "
+               f"{TREND_ARROWS.get(direction, '?')}  "
+               f"{minutes_ago}м назад")
+        if self._tray:
+            self._tray.setToolTip(f"{APP_NAME}\n{tip}")
 
     def closeEvent(self, event):
         if self._is_quitting:
+            if self._worker is not None and self._worker.isRunning():
+                self._worker.cancel()
+                self._worker.wait(1000)
+            if self._update_worker is not None and self._update_worker.isRunning():
+                self._update_worker.wait(1000)
             event.accept()
         else:
             event.ignore()
