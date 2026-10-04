@@ -284,13 +284,11 @@ namespace XDripWidget
 
         private void ConfirmAndQuit()
         {
-            var res = MessageBox.Show(
-                "Вы действительно хотите выйти из xDrip Widget?",
-                "Выход из программы",
-                MessageBoxButton.YesNo,
-                MessageBoxImage.Question,
-                MessageBoxResult.No
-            );
+            Window owner = (this.IsVisible && this.WindowState != WindowState.Minimized) ? this : null;
+            var res = owner != null
+                ? MessageBox.Show(owner, "Вы действительно хотите выйти из xDrip Widget?", "Выход из программы", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No)
+                : MessageBox.Show("Вы действительно хотите выйти из xDrip Widget?", "Выход из программы", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No);
+
             if (res == MessageBoxResult.Yes)
             {
                 _isConfirmedQuit = true;
@@ -302,13 +300,11 @@ namespace XDripWidget
         {
             if (!_isConfirmedQuit)
             {
-                var res = MessageBox.Show(
-                    "Вы действительно хотите выйти из xDrip Widget?",
-                    "Выход из программы",
-                    MessageBoxButton.YesNo,
-                    MessageBoxImage.Question,
-                    MessageBoxResult.No
-                );
+                Window owner = (this.IsVisible && this.WindowState != WindowState.Minimized) ? this : null;
+                var res = owner != null
+                    ? MessageBox.Show(owner, "Вы действительно хотите выйти из xDrip Widget?", "Выход из программы", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No)
+                    : MessageBox.Show("Вы действительно хотите выйти из xDrip Widget?", "Выход из программы", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No);
+
                 if (res != MessageBoxResult.Yes)
                 {
                     e.Cancel = true;
