@@ -28,3 +28,9 @@
 - Собран `dist/xDripWidget.exe` v1.9.0.
 - Собран `android/app/build/outputs/apk/debug/app-debug.apk` v1.9.0.
 - Опубликован релиз `v1.9.0` на GitHub с прикрепленными бинарными файлами.
+
+## [Completed] Синхронизация цветов со стандартом TIR/AGP и исправление падений на Windows 10 (04.10.2026 - 05.10.2026)
+- Приведение цветов к 6-диапазонному клиническому консенсусу TIR/AGP в Python и Android.
+- Оптимизация Android APK до 1.39 МБ с помощью R8 и instant tap-to-refresh на `goAsync()`.
+- Устранение гонок потоков QThread, необработанных исключений `NoneType` и перенос контекстного меню в `contextMenuEvent`.
+- Сборка `dist/xDripWidget.exe` (PyQt6 36.2 МБ) и `dist/xDripWidget.apk` (1.39 МБ).
