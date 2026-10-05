@@ -63,7 +63,7 @@ namespace XDripWidget
         {
             _notifyIcon = new Forms.NotifyIcon
             {
-                Text = "xDripWidget",
+                Text = "xDrip Widget",
                 Visible = true,
                 Icon = CreateBloodDropIcon(System.Drawing.Color.FromArgb(148, 163, 184))
             };
@@ -113,7 +113,8 @@ namespace XDripWidget
                 else
                 {
                     CanvasElement.SetError(result.ErrorMessage);
-                    _notifyIcon.Text = string.Format("xDripWidget: {0}", result.ErrorMessage);
+                    _notifyIcon.Text = string.Format("xDrip Widget: {0}", result.ErrorMessage);
+                    if (_notifyIcon.Text.Length >= 64) _notifyIcon.Text = _notifyIcon.Text.Substring(0, 63);
                     _notifyIcon.Icon = CreateBloodDropIcon(System.Drawing.Color.FromArgb(148, 163, 184));
                 }
             }
@@ -137,7 +138,7 @@ namespace XDripWidget
 
             string arrow = Constants.GetTrendArrow(data.Direction);
             string timeStr = Constants.FormatTimeAgo(data.MinutesAgo);
-            string tooltip = string.Format("xDrip: {0:F1} {1} ({2})", data.Mmol, arrow, timeStr);
+            string tooltip = string.Format("xDrip Widget: {0:F1} {1} ({2})", data.Mmol, arrow, timeStr);
             if (tooltip.Length >= 64) tooltip = tooltip.Substring(0, 63);
             _notifyIcon.Text = tooltip;
         }
