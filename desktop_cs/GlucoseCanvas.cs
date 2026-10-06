@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Windows;
 using System.Windows.Media;
+using System.Windows.Threading;
 
 namespace XDripWidget
 {
@@ -15,6 +16,11 @@ namespace XDripWidget
 
         public bool IsCompact { get; set; }
         public bool IsAcrylic { get; set; }
+
+        private DispatcherTimer _pulseTimer;
+        private double _pulsePhase;
+        private bool _isAlertActive;
+        private Color _alertColor = Constants.ColorVeryLow;
 
         private readonly Typeface _typefaceBig = new Typeface(new FontFamily("Segoe UI"), FontStyles.Normal, FontWeights.Bold, FontStretches.Normal);
         private readonly Typeface _typefaceMed = new Typeface(new FontFamily("Segoe UI"), FontStyles.Normal, FontWeights.SemiBold, FontStretches.Normal);
@@ -42,6 +48,56 @@ namespace XDripWidget
             InvalidateVisual();
         }
 
+        public void SetAlert(bool isActive, Color? color = null)
+        {
+            _isAlertActive = isActive;
+            if (color.HasValue)
+            {
+                _alertColor = color.Value;
+            }
+
+            if (isActive)
+            {
+                if (_pulseTimer == null)
+                {
+                    _pulseTimer = new DispatcherTimer();
+                    _pulseTimer.Interval = TimeSpan.FromMilliseconds(50);
+                    _pulseTimer.Tick += (s, e) =>
+                    {
+                        _pulsePhase += 0.15;
+                        if (_pulsePhase > Math.PI * 2) _pulsePhase -= Math.PI * 2;
+                        InvalidateVisual();
+                    };
+                }
+                if (!_pulseTimer.IsEnabled)
+                {
+                    _pulseTimer.Start();
+                }
+            }
+            else
+            {
+                if (_pulseTimer != null && _pulseTimer.IsEnabled)
+                {
+                    _pulseTimer.Stop();
+                }
+                _pulsePhase = 0;
+                InvalidateVisual();
+            }
+        }
+
+        private Pen GetBorderPen()
+        {
+            if (_isAlertActive)
+            {
+                double sinVal = 0.5 + 0.5 * Math.Sin(_pulsePhase);
+                byte alpha = (byte)(80 + 175 * sinVal);
+                double thickness = 1.0 + 1.8 * sinVal;
+                var alertBrush = new SolidColorBrush(Color.FromArgb(alpha, _alertColor.R, _alertColor.G, _alertColor.B));
+                return new Pen(alertBrush, thickness);
+            }
+            return new Pen(new SolidColorBrush(Constants.ColorBorder), 1.0);
+        }
+
         protected override void OnRender(DrawingContext dc)
         {
             base.OnRender(dc);
@@ -59,7 +115,7 @@ namespace XDripWidget
 
             // 1. Background rounded rectangle
             var bgBrush = IsAcrylic ? new SolidColorBrush(Color.FromArgb(210, 15, 23, 42)) : new SolidColorBrush(Constants.ColorBg);
-            var borderPen = new Pen(new SolidColorBrush(Constants.ColorBorder), 1.0);
+            var borderPen = GetBorderPen();
             dc.DrawRoundedRectangle(bgBrush, borderPen, new Rect(0.5, 0.5, w - 1.0, h - 1.0), 14, 14);
 
             // 2. Loading state
@@ -271,7 +327,7 @@ namespace XDripWidget
         {
             double radius = h / 2.0;
             var pillBgBrush = IsAcrylic ? new SolidColorBrush(Color.FromArgb(200, 15, 23, 42)) : new SolidColorBrush(Constants.ColorBg);
-            var pillBorderPen = new Pen(new SolidColorBrush(Constants.ColorBorder), 1.0);
+            var pillBorderPen = GetBorderPen();
             dc.DrawRoundedRectangle(pillBgBrush, pillBorderPen, new Rect(0.5, 0.5, w - 1.0, h - 1.0), radius, radius);
 
             Color pillStatusColor = _data != null ? Constants.GetGlucoseColor(_data.Mmol, _data.IsStale) : Constants.ColorGray;

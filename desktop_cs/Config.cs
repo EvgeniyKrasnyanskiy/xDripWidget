@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -26,6 +27,13 @@ namespace XDripWidget
         public bool AcrylicBlur { get; set; }
         public bool CompactMode { get; set; }
 
+        public double ThresholdLow { get; set; }
+        public double ThresholdHigh { get; set; }
+        public double ThresholdUrgentLow { get; set; }
+        public double ThresholdUrgentHigh { get; set; }
+        public bool SoundAlertsEnabled { get; set; }
+        public bool VisualAlertsEnabled { get; set; }
+
         public Config()
         {
             ServerUrl = "http://localhost:8080";
@@ -38,6 +46,13 @@ namespace XDripWidget
             ClickThrough = false;
             AcrylicBlur = true;
             CompactMode = false;
+
+            ThresholdLow = 3.9;
+            ThresholdHigh = 10.0;
+            ThresholdUrgentLow = 3.0;
+            ThresholdUrgentHigh = 14.0;
+            SoundAlertsEnabled = true;
+            VisualAlertsEnabled = true;
 
             _configPath = GetConfigFilePath();
             Load();
@@ -120,6 +135,42 @@ namespace XDripWidget
             {
                 CompactMode = cm;
             }
+
+            double tLow;
+            if (double.TryParse(ReadKey("Alerts", "threshold_low", "3.9"), NumberStyles.Any, CultureInfo.InvariantCulture, out tLow))
+            {
+                ThresholdLow = Math.Max(2.0, Math.Min(10.0, tLow));
+            }
+
+            double tHigh;
+            if (double.TryParse(ReadKey("Alerts", "threshold_high", "10.0"), NumberStyles.Any, CultureInfo.InvariantCulture, out tHigh))
+            {
+                ThresholdHigh = Math.Max(6.0, Math.Min(25.0, tHigh));
+            }
+
+            double tUrgentLow;
+            if (double.TryParse(ReadKey("Alerts", "threshold_urgent_low", "3.0"), NumberStyles.Any, CultureInfo.InvariantCulture, out tUrgentLow))
+            {
+                ThresholdUrgentLow = Math.Max(1.5, Math.Min(6.0, tUrgentLow));
+            }
+
+            double tUrgentHigh;
+            if (double.TryParse(ReadKey("Alerts", "threshold_urgent_high", "14.0"), NumberStyles.Any, CultureInfo.InvariantCulture, out tUrgentHigh))
+            {
+                ThresholdUrgentHigh = Math.Max(10.0, Math.Min(30.0, tUrgentHigh));
+            }
+
+            bool snd;
+            if (bool.TryParse(ReadKey("Alerts", "sound_enabled", "true"), out snd))
+            {
+                SoundAlertsEnabled = snd;
+            }
+
+            bool vis;
+            if (bool.TryParse(ReadKey("Alerts", "visual_enabled", "true"), out vis))
+            {
+                VisualAlertsEnabled = vis;
+            }
         }
 
         public void Save()
@@ -134,6 +185,14 @@ namespace XDripWidget
                 WriteKey("General", "click_through", ClickThrough ? "true" : "false");
                 WriteKey("General", "acrylic_blur", AcrylicBlur ? "true" : "false");
                 WriteKey("General", "compact_mode", CompactMode ? "true" : "false");
+
+                WriteKey("Alerts", "threshold_low", ThresholdLow.ToString("0.0", CultureInfo.InvariantCulture));
+                WriteKey("Alerts", "threshold_high", ThresholdHigh.ToString("0.0", CultureInfo.InvariantCulture));
+                WriteKey("Alerts", "threshold_urgent_low", ThresholdUrgentLow.ToString("0.0", CultureInfo.InvariantCulture));
+                WriteKey("Alerts", "threshold_urgent_high", ThresholdUrgentHigh.ToString("0.0", CultureInfo.InvariantCulture));
+                WriteKey("Alerts", "sound_enabled", SoundAlertsEnabled ? "true" : "false");
+                WriteKey("Alerts", "visual_enabled", VisualAlertsEnabled ? "true" : "false");
+
                 if (WindowX >= 0 && WindowY >= 0)
                 {
                     WriteKey("Position", "x", WindowX.ToString("F0"));

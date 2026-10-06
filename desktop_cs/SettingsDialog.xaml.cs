@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Windows;
 using System.Windows.Input;
 
@@ -22,6 +23,13 @@ namespace XDripWidget
             TxtHotkey.Text = string.IsNullOrEmpty(_config.TreatmentHotkey) ? "" : _config.TreatmentHotkey;
             ChkStartup.IsChecked = Config.IsRunOnStartupEnabled();
             ChkAcrylic.IsChecked = _config.AcrylicBlur;
+
+            TxtLow.Text = _config.ThresholdLow.ToString("0.0", CultureInfo.InvariantCulture);
+            TxtHigh.Text = _config.ThresholdHigh.ToString("0.0", CultureInfo.InvariantCulture);
+            TxtUrgentLow.Text = _config.ThresholdUrgentLow.ToString("0.0", CultureInfo.InvariantCulture);
+            TxtUrgentHigh.Text = _config.ThresholdUrgentHigh.ToString("0.0", CultureInfo.InvariantCulture);
+            ChkSound.IsChecked = _config.SoundAlertsEnabled;
+            ChkVisual.IsChecked = _config.VisualAlertsEnabled;
         }
 
         private void TxtHotkey_PreviewKeyDown(object sender, KeyEventArgs e)
@@ -74,6 +82,15 @@ namespace XDripWidget
             }
         }
 
+        private void BtnTestSound_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                System.Media.SystemSounds.Exclamation.Play();
+            }
+            catch { }
+        }
+
         private void BtnSave_Click(object sender, RoutedEventArgs e)
         {
             _config.ServerUrl = TxtServerUrl.Text.Trim();
@@ -89,6 +106,34 @@ namespace XDripWidget
             _config.TreatmentHotkey = TxtHotkey.Text.Trim();
             _config.AcrylicBlur = ChkAcrylic.IsChecked == true;
             Config.SetRunOnStartup(ChkStartup.IsChecked == true);
+
+            double tLow;
+            if (double.TryParse(TxtLow.Text.Trim().Replace(',', '.'), NumberStyles.Any, CultureInfo.InvariantCulture, out tLow))
+            {
+                _config.ThresholdLow = Math.Max(2.0, Math.Min(10.0, tLow));
+            }
+
+            double tHigh;
+            if (double.TryParse(TxtHigh.Text.Trim().Replace(',', '.'), NumberStyles.Any, CultureInfo.InvariantCulture, out tHigh))
+            {
+                _config.ThresholdHigh = Math.Max(6.0, Math.Min(25.0, tHigh));
+            }
+
+            double tUrgentLow;
+            if (double.TryParse(TxtUrgentLow.Text.Trim().Replace(',', '.'), NumberStyles.Any, CultureInfo.InvariantCulture, out tUrgentLow))
+            {
+                _config.ThresholdUrgentLow = Math.Max(1.5, Math.Min(6.0, tUrgentLow));
+            }
+
+            double tUrgentHigh;
+            if (double.TryParse(TxtUrgentHigh.Text.Trim().Replace(',', '.'), NumberStyles.Any, CultureInfo.InvariantCulture, out tUrgentHigh))
+            {
+                _config.ThresholdUrgentHigh = Math.Max(10.0, Math.Min(30.0, tUrgentHigh));
+            }
+
+            _config.SoundAlertsEnabled = ChkSound.IsChecked == true;
+            _config.VisualAlertsEnabled = ChkVisual.IsChecked == true;
+
             _config.Save();
             DialogResult = true;
             Close();

@@ -32,7 +32,8 @@ namespace XDripWidget
         private DateTime _lastHypoAlert = DateTime.MinValue;
         private DateTime _lastHyperAlert = DateTime.MinValue;
         private DateTime _lastCriticalAlert = DateTime.MinValue;
-        private static readonly TimeSpan AlertCooldown = TimeSpan.FromHours(1);
+        private DateTime _lastRapidDropAlert = DateTime.MinValue;
+        private static readonly TimeSpan AlertCooldown = TimeSpan.FromMinutes(20);
 
         public MainWindow()
         {
@@ -195,24 +196,92 @@ namespace XDripWidget
 
         private void CheckAlerts(CurrentGlucoseData data)
         {
-            if (data == null || data.IsStale || data.Mmol <= 0) return;
+            if (data == null || data.IsStale || data.Mmol <= 0)
+            {
+                CanvasElement.SetAlert(false);
+                return;
+            }
 
             var now = DateTime.Now;
-            if (data.Mmol >= Constants.ALERT_CRITICAL && (now - _lastCriticalAlert) > AlertCooldown)
+            bool isAlert = false;
+            System.Windows.Media.Color alertColor = Constants.ColorVeryLow;
+
+            // 1. Critical Low (Urgent Hypo)
+            if (data.Mmol <= _config.ThresholdUrgentLow)
             {
-                _lastCriticalAlert = now;
-                _notifyIcon.ShowBalloonTip(10000, "⛔ Критический сахар!", string.Format("{0:F1} ммоль/л — немедленно примите меры!", data.Mmol), Forms.ToolTipIcon.Error);
+                isAlert = true;
+                alertColor = Constants.ColorVeryLow;
+                if ((now - _lastCriticalAlert) > AlertCooldown)
+                {
+                    _lastCriticalAlert = now;
+                    PlaySoundAlert(System.Media.SystemSounds.Hand);
+                    _notifyIcon.ShowBalloonTip(10000, "⛔ Глубокая гипогликемия!", string.Format("{0:F1} ммоль/л — срочно примите быстрые углеводы!", data.Mmol), Forms.ToolTipIcon.Error);
+                }
             }
-            else if (data.Mmol >= Constants.ALERT_HYPER && (now - _lastHyperAlert) > AlertCooldown)
+            // 2. Normal Hypo
+            else if (data.Mmol <= _config.ThresholdLow)
             {
-                _lastHyperAlert = now;
-                _notifyIcon.ShowBalloonTip(7000, "🟡 Высокий сахар", string.Format("{0:F1} ммоль/л — выше нормы.", data.Mmol), Forms.ToolTipIcon.Warning);
+                isAlert = true;
+                alertColor = Constants.ColorVeryLow;
+                if ((now - _lastHypoAlert) > AlertCooldown)
+                {
+                    _lastHypoAlert = now;
+                    PlaySoundAlert(System.Media.SystemSounds.Hand);
+                    _notifyIcon.ShowBalloonTip(8000, "🔴 Низкий сахар!", string.Format("{0:F1} ммоль/л — ниже нормы ({1:0.0}).", data.Mmol, _config.ThresholdLow), Forms.ToolTipIcon.Warning);
+                }
             }
-            else if (data.Mmol <= Constants.ALERT_HYPO && (now - _lastHypoAlert) > AlertCooldown)
+            // 3. Rapid Drop trend (DoubleDown or SingleDown under 6.0 mmol/l)
+            else if ((data.Direction == "DoubleDown" || (data.Direction == "SingleDown" && data.Mmol < 6.0)) && (now - _lastRapidDropAlert) > AlertCooldown)
             {
-                _lastHypoAlert = now;
-                _notifyIcon.ShowBalloonTip(10000, "🔴 Низкий сахар!", string.Format("{0:F1} ммоль/л — опасная гипогликемия!", data.Mmol), Forms.ToolTipIcon.Error);
+                isAlert = true;
+                alertColor = Constants.ColorLow;
+                _lastRapidDropAlert = now;
+                PlaySoundAlert(System.Media.SystemSounds.Exclamation);
+                string arrow = Constants.GetTrendArrow(data.Direction);
+                _notifyIcon.ShowBalloonTip(8000, "📉 Резкое падение сахара!", string.Format("{0:F1} {1} ({2}) — сахар стремительно падает!", data.Mmol, arrow, data.Delta), Forms.ToolTipIcon.Warning);
             }
+            // 4. Critical High (Urgent Hyper)
+            else if (data.Mmol >= _config.ThresholdUrgentHigh)
+            {
+                isAlert = true;
+                alertColor = Constants.ColorVeryHigh;
+                if ((now - _lastCriticalAlert) > AlertCooldown)
+                {
+                    _lastCriticalAlert = now;
+                    PlaySoundAlert(System.Media.SystemSounds.Hand);
+                    _notifyIcon.ShowBalloonTip(10000, "⛔ Критический гиперсахар!", string.Format("{0:F1} ммоль/л — проверьте кетоны и сделайте коррекцию!", data.Mmol), Forms.ToolTipIcon.Error);
+                }
+            }
+            // 5. Normal High
+            else if (data.Mmol >= _config.ThresholdHigh)
+            {
+                if ((now - _lastHyperAlert) > AlertCooldown)
+                {
+                    _lastHyperAlert = now;
+                    PlaySoundAlert(System.Media.SystemSounds.Asterisk);
+                    _notifyIcon.ShowBalloonTip(7000, "🟡 Высокий сахар", string.Format("{0:F1} ммоль/л — выше нормы ({1:0.0}).", data.Mmol, _config.ThresholdHigh), Forms.ToolTipIcon.Info);
+                }
+            }
+
+            // Visual pulsing alert
+            if (_config.VisualAlertsEnabled && isAlert)
+            {
+                CanvasElement.SetAlert(true, alertColor);
+            }
+            else
+            {
+                CanvasElement.SetAlert(false);
+            }
+        }
+
+        private void PlaySoundAlert(System.Media.SystemSound sound)
+        {
+            if (!_config.SoundAlertsEnabled || sound == null) return;
+            try
+            {
+                sound.Play();
+            }
+            catch { }
         }
 
         private System.Drawing.Icon CreateBloodDropIcon(System.Drawing.Color color)
