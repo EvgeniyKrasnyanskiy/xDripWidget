@@ -46,3 +46,9 @@
 - [x] Перевод диалогов на `WindowStartupLocation="Manual"` (`TreatmentDialog`, `SettingsDialog`, `TreatmentHistoryDialog`, `AboutDialog`).
 - [x] Применение позиционирования при вызове окон из меню.
 - [x] Верификация компиляции и тестирования.
+
+### 8. Интеграция с рабочим столом: Автозапуск и прилипание к краям (Screen Snapping) [Completed]
+- [x] Чекбокс «Запускать при старте Windows» в `SettingsDialog.xaml` и привязка к реестру `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`.
+- [x] Поддержка определения автозапуска в `Config.cs` / `StartupHelper.cs`.
+- [x] Логика магнитного прилипания к границам экрана (Screen Snapping, порог 15-20 px) при перетаскивании в `MainWindow.xaml.cs`.
+- [x] Верификация сборки и проверка работы.

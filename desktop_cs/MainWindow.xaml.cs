@@ -6,6 +6,8 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Threading;
+using System.Runtime.InteropServices;
+using System.Windows.Interop;
 using Forms = System.Windows.Forms;
 
 namespace XDripWidget
@@ -57,6 +59,14 @@ namespace XDripWidget
 
             // Initial fetch
             FetchDataAsync();
+
+            // Hook Win32 messages for real-time edge snapping
+            var helper = new WindowInteropHelper(this);
+            var source = HwndSource.FromHwnd(helper.Handle);
+            if (source != null)
+            {
+                source.AddHook(WndProc);
+            }
         }
 
         private void SetupTrayIcon()
@@ -216,8 +226,117 @@ namespace XDripWidget
             }
             _dragStartScreenPos = null;
 
+            SnapToScreenEdges();
+
             // Save new position
             _config.SavePosition(Left, Top);
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct RECT
+        {
+            public int Left;
+            public int Top;
+            public int Right;
+            public int Bottom;
+        }
+
+        private const int WM_MOVING = 0x0216;
+        private const int SnapThresholdPx = 20;
+
+        private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+        {
+            if (msg == WM_MOVING)
+            {
+                RECT rect = (RECT)Marshal.PtrToStructure(lParam, typeof(RECT));
+                int cx = rect.Left + (rect.Right - rect.Left) / 2;
+                int cy = rect.Top + (rect.Bottom - rect.Top) / 2;
+                var screen = Forms.Screen.FromPoint(new System.Drawing.Point(cx, cy));
+                var wa = screen.WorkingArea;
+
+                int w = rect.Right - rect.Left;
+                int h = rect.Bottom - rect.Top;
+
+                // Horizontal snap
+                if (Math.Abs(rect.Left - wa.Left) <= SnapThresholdPx)
+                {
+                    rect.Left = wa.Left;
+                    rect.Right = wa.Left + w;
+                }
+                else if (Math.Abs(rect.Right - wa.Right) <= SnapThresholdPx)
+                {
+                    rect.Right = wa.Right;
+                    rect.Left = wa.Right - w;
+                }
+
+                // Vertical snap
+                if (Math.Abs(rect.Top - wa.Top) <= SnapThresholdPx)
+                {
+                    rect.Top = wa.Top;
+                    rect.Bottom = wa.Top + h;
+                }
+                else if (Math.Abs(rect.Bottom - wa.Bottom) <= SnapThresholdPx)
+                {
+                    rect.Bottom = wa.Bottom;
+                    rect.Top = wa.Bottom - h;
+                }
+
+                Marshal.StructureToPtr(rect, lParam, true);
+                handled = true;
+                return (IntPtr)1;
+            }
+            return IntPtr.Zero;
+        }
+
+        private void SnapToScreenEdges()
+        {
+            try
+            {
+                var helper = new WindowInteropHelper(this);
+                if (helper.Handle != IntPtr.Zero)
+                {
+                    var screen = Forms.Screen.FromHandle(helper.Handle);
+                    var source = PresentationSource.FromVisual(this);
+                    double dpiX = 1.0;
+                    double dpiY = 1.0;
+                    if (source != null && source.CompositionTarget != null)
+                    {
+                        dpiX = source.CompositionTarget.TransformToDevice.M11;
+                        dpiY = source.CompositionTarget.TransformToDevice.M22;
+                    }
+
+                    if (dpiX > 0 && dpiY > 0)
+                    {
+                        double workLeft = screen.WorkingArea.Left / dpiX;
+                        double workTop = screen.WorkingArea.Top / dpiY;
+                        double workRight = screen.WorkingArea.Right / dpiX;
+                        double workBottom = screen.WorkingArea.Bottom / dpiY;
+
+                        const double snapDips = 20.0;
+                        double w = ActualWidth > 0 ? ActualWidth : Width;
+                        double h = ActualHeight > 0 ? ActualHeight : Height;
+
+                        if (Math.Abs(Left - workLeft) <= snapDips)
+                        {
+                            Left = workLeft;
+                        }
+                        else if (Math.Abs((Left + w) - workRight) <= snapDips)
+                        {
+                            Left = workRight - w;
+                        }
+
+                        if (Math.Abs(Top - workTop) <= snapDips)
+                        {
+                            Top = workTop;
+                        }
+                        else if (Math.Abs((Top + h) - workBottom) <= snapDips)
+                        {
+                            Top = workBottom - h;
+                        }
+                    }
+                }
+            }
+            catch { }
         }
 
         private void Window_MouseRightButtonUp(object sender, MouseButtonEventArgs e)

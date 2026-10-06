@@ -131,5 +131,45 @@ namespace XDripWidget
         {
             WritePrivateProfileString(section, key, value, _configPath);
         }
+
+        public static bool IsRunOnStartupEnabled()
+        {
+            try
+            {
+                using (var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", false))
+                {
+                    if (key != null)
+                    {
+                        var val = key.GetValue("xDripWidget") as string;
+                        return !string.IsNullOrEmpty(val);
+                    }
+                }
+            }
+            catch { }
+            return false;
+        }
+
+        public static void SetRunOnStartup(bool enable)
+        {
+            try
+            {
+                using (var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", true))
+                {
+                    if (key != null)
+                    {
+                        if (enable)
+                        {
+                            string exePath = System.Reflection.Assembly.GetExecutingAssembly().Location;
+                            key.SetValue("xDripWidget", "\"" + exePath + "\"");
+                        }
+                        else
+                        {
+                            key.DeleteValue("xDripWidget", false);
+                        }
+                    }
+                }
+            }
+            catch { }
+        }
     }
 }

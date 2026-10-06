@@ -17,6 +17,7 @@ namespace XDripWidget
             SliderTransparency.Value = _config.Transparency;
             LblTransparency.Text = string.Format("{0}%", _config.Transparency);
             TxtInterval.Text = _config.RefreshIntervalMinutes.ToString();
+            ChkStartup.IsChecked = Config.IsRunOnStartupEnabled();
         }
 
         private void SliderTransparency_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
@@ -39,6 +40,7 @@ namespace XDripWidget
                 _config.RefreshIntervalMinutes = Math.Max(1, Math.Min(60, interval));
             }
 
+            Config.SetRunOnStartup(ChkStartup.IsChecked == true);
             _config.Save();
             DialogResult = true;
             Close();
