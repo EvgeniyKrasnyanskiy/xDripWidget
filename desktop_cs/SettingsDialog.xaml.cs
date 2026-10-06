@@ -21,6 +21,7 @@ namespace XDripWidget
             TxtInterval.Text = _config.RefreshIntervalMinutes.ToString();
             TxtHotkey.Text = string.IsNullOrEmpty(_config.TreatmentHotkey) ? "" : _config.TreatmentHotkey;
             ChkStartup.IsChecked = Config.IsRunOnStartupEnabled();
+            ChkAcrylic.IsChecked = _config.AcrylicBlur;
         }
 
         private void TxtHotkey_PreviewKeyDown(object sender, KeyEventArgs e)
@@ -86,6 +87,7 @@ namespace XDripWidget
             }
 
             _config.TreatmentHotkey = TxtHotkey.Text.Trim();
+            _config.AcrylicBlur = ChkAcrylic.IsChecked == true;
             Config.SetRunOnStartup(ChkStartup.IsChecked == true);
             _config.Save();
             DialogResult = true;

@@ -19,8 +19,15 @@ namespace XDripWidget
         private readonly DispatcherTimer _timer = new DispatcherTimer();
         private Forms.NotifyIcon _notifyIcon;
         private Forms.MenuItem _trayClickThroughItem;
+        private Forms.MenuItem _trayCompactItem;
+        private Forms.MenuItem _trayAcrylicItem;
         private System.Windows.Point? _dragStartScreenPos;
         private bool _isFetching = false;
+
+        private const double NormalWidth = 220;
+        private const double NormalHeight = 145;
+        private const double CompactWidth = 140;
+        private const double CompactHeight = 36;
 
         private DateTime _lastHypoAlert = DateTime.MinValue;
         private DateTime _lastHyperAlert = DateTime.MinValue;
@@ -72,6 +79,15 @@ namespace XDripWidget
             // Register global hotkey
             UpdateGlobalHotkey();
 
+            // Apply compact mode if saved
+            if (_config.CompactMode)
+            {
+                SetCompactMode(true);
+            }
+
+            // Apply acrylic blur
+            SetAcrylicBlur(_config.AcrylicBlur);
+
             // Apply click-through mode if saved
             if (_config.ClickThrough)
             {
@@ -92,9 +108,19 @@ namespace XDripWidget
             contextMenu.MenuItems.Add("Показать / Скрыть", (s, e) => ToggleVisibility());
             contextMenu.MenuItems.Add("Обновить сейчас", (s, e) => FetchDataAsync());
             contextMenu.MenuItems.Add("Ввести терапию", (s, e) => Dispatcher.Invoke((Action)(() => MenuTreatments_Click(this, new RoutedEventArgs()))));
+            
+            _trayCompactItem = new Forms.MenuItem("Компактный режим («Мини-пилюля»)", (s, e) => Dispatcher.Invoke((Action)(() => SetCompactMode(!_config.CompactMode))));
+            _trayCompactItem.Checked = _config.CompactMode;
+            contextMenu.MenuItems.Add(_trayCompactItem);
+
             _trayClickThroughItem = new Forms.MenuItem("Режим «Призрак» (сквозной клик)", (s, e) => ToggleClickThrough());
             _trayClickThroughItem.Checked = _config.ClickThrough;
             contextMenu.MenuItems.Add(_trayClickThroughItem);
+
+            _trayAcrylicItem = new Forms.MenuItem("Матовое стекло (Acrylic Blur)", (s, e) => Dispatcher.Invoke((Action)(() => SetAcrylicBlur(!_config.AcrylicBlur))));
+            _trayAcrylicItem.Checked = _config.AcrylicBlur;
+            contextMenu.MenuItems.Add(_trayAcrylicItem);
+
             contextMenu.MenuItems.Add("Выход", (s, e) => Dispatcher.Invoke((Action)ConfirmAndQuit));
             _notifyIcon.ContextMenu = contextMenu;
 
@@ -281,6 +307,41 @@ namespace XDripWidget
         [DllImport("user32.dll", SetLastError = true)]
         private static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
 
+        [DllImport("user32.dll")]
+        private static extern int SetWindowCompositionAttribute(IntPtr hwnd, ref WindowCompositionAttributeData data);
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct WindowCompositionAttributeData
+        {
+            public WindowCompositionAttribute Attribute;
+            public IntPtr Data;
+            public int SizeOfData;
+        }
+
+        private enum WindowCompositionAttribute
+        {
+            WCA_ACCENT_POLICY = 19
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct AccentPolicy
+        {
+            public AccentState AccentState;
+            public int AccentFlags;
+            public int GradientColor;
+            public int AnimationId;
+        }
+
+        private enum AccentState
+        {
+            ACCENT_DISABLED = 0,
+            ACCENT_ENABLE_GRADIENT = 1,
+            ACCENT_ENABLE_TRANSPARENTGRADIENT = 2,
+            ACCENT_ENABLE_BLURBEHIND = 3,
+            ACCENT_ENABLE_ACRYLICBLURBEHIND = 4,
+            ACCENT_INVALID_STATE = 5
+        }
+
         private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
         {
             if (msg == WM_MOVING)
@@ -382,6 +443,117 @@ namespace XDripWidget
             {
                 _trayClickThroughItem.Checked = enabled;
             }
+        }
+
+        private void Window_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+        {
+            if (e.ChangedButton == MouseButton.Left)
+            {
+                SetCompactMode(!_config.CompactMode);
+                e.Handled = true;
+            }
+        }
+
+        private void MenuCompactMode_Click(object sender, RoutedEventArgs e)
+        {
+            SetCompactMode(MenuCompactMode.IsChecked);
+        }
+
+        private void SetCompactMode(bool compact)
+        {
+            _config.SaveCompactMode(compact);
+            if (MenuCompactMode != null)
+            {
+                MenuCompactMode.IsChecked = compact;
+            }
+            if (_trayCompactItem != null)
+            {
+                _trayCompactItem.Checked = compact;
+            }
+
+            if (compact)
+            {
+                Width = CompactWidth;
+                Height = CompactHeight;
+                CanvasElement.IsCompact = true;
+            }
+            else
+            {
+                Width = NormalWidth;
+                Height = NormalHeight;
+                CanvasElement.IsCompact = false;
+            }
+            CanvasElement.InvalidateVisual();
+            SnapToScreenEdges();
+        }
+
+        private void MenuAcrylicBlur_Click(object sender, RoutedEventArgs e)
+        {
+            SetAcrylicBlur(MenuAcrylicBlur.IsChecked);
+        }
+
+        private void SetAcrylicBlur(bool enable)
+        {
+            _config.SaveAcrylicBlur(enable);
+            if (MenuAcrylicBlur != null)
+            {
+                MenuAcrylicBlur.IsChecked = enable;
+            }
+            if (_trayAcrylicItem != null)
+            {
+                _trayAcrylicItem.Checked = enable;
+            }
+
+            CanvasElement.IsAcrylic = enable;
+            ApplyAcrylicBlur(enable);
+            CanvasElement.InvalidateVisual();
+        }
+
+        private void ApplyAcrylicBlur(bool enable)
+        {
+            try
+            {
+                var helper = new WindowInteropHelper(this);
+                if (helper.Handle == IntPtr.Zero) return;
+
+                var accent = new AccentPolicy();
+                int accentStructSize = Marshal.SizeOf(accent);
+
+                if (enable)
+                {
+                    accent.AccentState = AccentState.ACCENT_ENABLE_ACRYLICBLURBEHIND;
+                    accent.AccentFlags = 2;
+                    accent.GradientColor = unchecked((int)0x992A170F);
+                }
+                else
+                {
+                    accent.AccentState = AccentState.ACCENT_DISABLED;
+                }
+
+                IntPtr accentPtr = Marshal.AllocHGlobal(accentStructSize);
+                try
+                {
+                    Marshal.StructureToPtr(accent, accentPtr, false);
+
+                    var data = new WindowCompositionAttributeData();
+                    data.Attribute = WindowCompositionAttribute.WCA_ACCENT_POLICY;
+                    data.SizeOfData = accentStructSize;
+                    data.Data = accentPtr;
+
+                    int res = SetWindowCompositionAttribute(helper.Handle, ref data);
+                    if (enable && res != 0)
+                    {
+                        accent.AccentState = AccentState.ACCENT_ENABLE_BLURBEHIND;
+                        Marshal.StructureToPtr(accent, accentPtr, false);
+                        SetWindowCompositionAttribute(helper.Handle, ref data);
+                    }
+                }
+                finally
+                {
+                    Marshal.FreeHGlobal(accentPtr);
+                }
+            }
+            catch { }
         }
 
         private void UpdateGlobalHotkey()
@@ -633,6 +805,7 @@ namespace XDripWidget
                 int interval = Math.Max(1, _config.RefreshIntervalMinutes);
                 _timer.Interval = TimeSpan.FromMinutes(interval);
                 UpdateGlobalHotkey();
+                SetAcrylicBlur(_config.AcrylicBlur);
                 FetchDataAsync();
             }
         }

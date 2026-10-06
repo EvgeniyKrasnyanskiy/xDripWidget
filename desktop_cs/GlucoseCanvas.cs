@@ -13,6 +13,9 @@ namespace XDripWidget
         private string _errorMessage;
         private bool _isLoading;
 
+        public bool IsCompact { get; set; }
+        public bool IsAcrylic { get; set; }
+
         private readonly Typeface _typefaceBig = new Typeface(new FontFamily("Segoe UI"), FontStyles.Normal, FontWeights.Bold, FontStretches.Normal);
         private readonly Typeface _typefaceMed = new Typeface(new FontFamily("Segoe UI"), FontStyles.Normal, FontWeights.SemiBold, FontStretches.Normal);
         private readonly Typeface _typefaceSml = new Typeface(new FontFamily("Segoe UI"), FontStyles.Normal, FontWeights.Normal, FontStretches.Normal);
@@ -47,8 +50,15 @@ namespace XDripWidget
             double h = ActualHeight;
             if (w <= 0 || h <= 0) return;
 
+            // Compact Pill Mode rendering
+            if (IsCompact || h <= 45)
+            {
+                RenderCompactPill(dc, w, h);
+                return;
+            }
+
             // 1. Background rounded rectangle
-            var bgBrush = new SolidColorBrush(Constants.ColorBg);
+            var bgBrush = IsAcrylic ? new SolidColorBrush(Color.FromArgb(210, 15, 23, 42)) : new SolidColorBrush(Constants.ColorBg);
             var borderPen = new Pen(new SolidColorBrush(Constants.ColorBorder), 1.0);
             dc.DrawRoundedRectangle(bgBrush, borderPen, new Rect(0.5, 0.5, w - 1.0, h - 1.0), 14, 14);
 
@@ -255,6 +265,40 @@ namespace XDripWidget
                 size,
                 brush
             );
+        }
+
+        private void RenderCompactPill(DrawingContext dc, double w, double h)
+        {
+            double radius = h / 2.0;
+            var pillBgBrush = IsAcrylic ? new SolidColorBrush(Color.FromArgb(200, 15, 23, 42)) : new SolidColorBrush(Constants.ColorBg);
+            var pillBorderPen = new Pen(new SolidColorBrush(Constants.ColorBorder), 1.0);
+            dc.DrawRoundedRectangle(pillBgBrush, pillBorderPen, new Rect(0.5, 0.5, w - 1.0, h - 1.0), radius, radius);
+
+            Color pillStatusColor = _data != null ? Constants.GetGlucoseColor(_data.Mmol, _data.IsStale) : Constants.ColorGray;
+            dc.DrawEllipse(new SolidColorBrush(pillStatusColor), null, new Point(13, h / 2.0), 3.5, 3.5);
+
+            if (_isLoading && _data == null && string.IsNullOrEmpty(_errorMessage))
+            {
+                DrawCenteredText(dc, "Загрузка…", 11, Constants.ColorSub, w, (h - 14) / 2.0);
+                return;
+            }
+
+            if (!string.IsNullOrEmpty(_errorMessage) || _data == null)
+            {
+                DrawCenteredText(dc, "📡 Ошибка", 11, Constants.ColorVeryLow, w, (h - 14) / 2.0);
+                return;
+            }
+
+            string arrow = Constants.GetTrendArrow(_data.Direction);
+            string glucoseText = string.Format(CultureInfo.InvariantCulture, "{0:F1} {1}", _data.Mmol, arrow);
+            var glucoseFt = CreateFormattedText(glucoseText, _typefaceBig, 16, pillStatusColor);
+
+            string deltaText = string.Format("({0})", _data.Delta);
+            var deltaFt = CreateFormattedText(deltaText, _typefaceMed, 12, Constants.ColorSub);
+
+            double textStartX = 22;
+            dc.DrawText(glucoseFt, new Point(textStartX, (h - glucoseFt.Height) / 2.0));
+            dc.DrawText(deltaFt, new Point(textStartX + glucoseFt.Width + 5, (h - deltaFt.Height) / 2.0 + 1));
         }
     }
 }

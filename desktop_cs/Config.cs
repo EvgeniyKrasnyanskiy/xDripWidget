@@ -23,6 +23,8 @@ namespace XDripWidget
         public double WindowY { get; set; }
         public string TreatmentHotkey { get; set; }
         public bool ClickThrough { get; set; }
+        public bool AcrylicBlur { get; set; }
+        public bool CompactMode { get; set; }
 
         public Config()
         {
@@ -34,6 +36,8 @@ namespace XDripWidget
             WindowY = -1;
             TreatmentHotkey = "Ctrl+Alt+D";
             ClickThrough = false;
+            AcrylicBlur = true;
+            CompactMode = false;
 
             _configPath = GetConfigFilePath();
             Load();
@@ -104,6 +108,18 @@ namespace XDripWidget
             {
                 ClickThrough = ct;
             }
+
+            bool ab;
+            if (bool.TryParse(ReadKey("General", "acrylic_blur", "true"), out ab))
+            {
+                AcrylicBlur = ab;
+            }
+
+            bool cm;
+            if (bool.TryParse(ReadKey("General", "compact_mode", "false"), out cm))
+            {
+                CompactMode = cm;
+            }
         }
 
         public void Save()
@@ -116,6 +132,8 @@ namespace XDripWidget
                 WriteKey("General", "refresh_interval", RefreshIntervalMinutes.ToString());
                 WriteKey("General", "hotkey_treatment", TreatmentHotkey ?? "");
                 WriteKey("General", "click_through", ClickThrough ? "true" : "false");
+                WriteKey("General", "acrylic_blur", AcrylicBlur ? "true" : "false");
+                WriteKey("General", "compact_mode", CompactMode ? "true" : "false");
                 if (WindowX >= 0 && WindowY >= 0)
                 {
                     WriteKey("Position", "x", WindowX.ToString("F0"));
@@ -137,6 +155,18 @@ namespace XDripWidget
         {
             ClickThrough = enabled;
             WriteKey("General", "click_through", enabled ? "true" : "false");
+        }
+
+        public void SaveCompactMode(bool enabled)
+        {
+            CompactMode = enabled;
+            WriteKey("General", "compact_mode", enabled ? "true" : "false");
+        }
+
+        public void SaveAcrylicBlur(bool enabled)
+        {
+            AcrylicBlur = enabled;
+            WriteKey("General", "acrylic_blur", enabled ? "true" : "false");
         }
 
         private string ReadKey(string section, string key, string defaultValue)
