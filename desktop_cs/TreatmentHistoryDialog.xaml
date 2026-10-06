@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="История терапий"
         Icon="app.ico"
-        Width="640" Height="400"
+        Width="680" Height="420"
         WindowStartupLocation="Manual"
         Background="#0F172A"
         Foreground="#F8FAFC">
@@ -21,6 +21,7 @@
             <Setter Property="Background" Value="#1E293B"/>
             <Setter Property="Foreground" Value="#F8FAFC"/>
             <Setter Property="BorderBrush" Value="#334155"/>
+            <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled"/>
         </Style>
         <Style TargetType="GridViewColumnHeader">
             <Setter Property="Background" Value="#0F172A"/>
@@ -53,12 +54,12 @@
         <ListView Grid.Row="1" x:Name="ListTreatments">
             <ListView.View>
                 <GridView>
-                    <GridViewColumn Header="Время" Width="130" DisplayMemberBinding="{Binding DateStr}"/>
-                    <GridViewColumn Header="Тип" Width="130" DisplayMemberBinding="{Binding EventType}"/>
-                    <GridViewColumn Header="Инсулин" Width="70" DisplayMemberBinding="{Binding InsulinStr}"/>
-                    <GridViewColumn Header="Углеводы" Width="70" DisplayMemberBinding="{Binding CarbsStr}"/>
-                    <GridViewColumn Header="Сахар" Width="70" DisplayMemberBinding="{Binding GlucoseStr}"/>
-                    <GridViewColumn Header="Заметка" Width="120" DisplayMemberBinding="{Binding Notes}"/>
+                    <GridViewColumn Header="Время" Width="125" DisplayMemberBinding="{Binding DateStr}"/>
+                    <GridViewColumn Header="Тип" Width="125" DisplayMemberBinding="{Binding EventType}"/>
+                    <GridViewColumn Header="Инсулин" Width="75" DisplayMemberBinding="{Binding InsulinStr}"/>
+                    <GridViewColumn Header="Углеводы" Width="75" DisplayMemberBinding="{Binding CarbsStr}"/>
+                    <GridViewColumn Header="Сахар" Width="65" DisplayMemberBinding="{Binding GlucoseStr}"/>
+                    <GridViewColumn Header="Заметка" Width="160" DisplayMemberBinding="{Binding Notes}"/>
                 </GridView>
             </ListView.View>
         </ListView>

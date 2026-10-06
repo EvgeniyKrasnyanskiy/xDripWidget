@@ -104,6 +104,7 @@
     <Compile Include="Models.cs" />
     <Compile Include="ApiClient.cs" />
     <Compile Include="GlucoseCanvas.cs" />
+    <Compile Include="DarkThemeHelper.cs" />
   </ItemGroup>
   <ItemGroup>
     <Resource Include="app.ico" />

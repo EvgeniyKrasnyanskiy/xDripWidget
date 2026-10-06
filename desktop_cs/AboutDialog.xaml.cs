@@ -8,6 +8,7 @@ namespace XDripWidget
         public AboutDialog()
         {
             InitializeComponent();
+            DarkThemeHelper.ApplyDarkTitleBar(this);
         }
 
         private void BtnGitHub_Click(object sender, RoutedEventArgs e)

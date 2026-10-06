@@ -13,6 +13,7 @@ namespace XDripWidget
         public SettingsDialog(Config config)
         {
             InitializeComponent();
+            DarkThemeHelper.ApplyDarkTitleBar(this);
             _config = config;
 
             TxtServerUrl.Text = _config.ServerUrl ?? "http://localhost:8080";

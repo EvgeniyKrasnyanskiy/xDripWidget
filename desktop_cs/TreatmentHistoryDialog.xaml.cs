@@ -27,12 +27,35 @@ namespace XDripWidget
         public TreatmentHistoryDialog(ApiClient apiClient, string baseUrl, string apiSecret)
         {
             InitializeComponent();
+            DarkThemeHelper.ApplyDarkTitleBar(this);
             _apiClient = apiClient;
             _baseUrl = baseUrl;
             _apiSecret = apiSecret;
 
             ListTreatments.ItemsSource = _items;
             LoadTreatmentsAsync();
+        }
+
+        private static string FormatEventType(string raw)
+        {
+            if (string.IsNullOrEmpty(raw)) return "—";
+            switch (raw.Trim())
+            {
+                case "Correction Bolus": return "Коррекция";
+                case "Meal Bolus": return "Болюс на еду";
+                case "Carb Intake": return "Углеводы";
+                case "Note": return "Заметка";
+                case "BG Check": return "Замер СК";
+                case "Snack Bolus": return "Перекус";
+                case "Combo Bolus": return "Квадратный болюс";
+                case "Temp Basal": return "ВБС (базал)";
+                case "Profile Switch": return "Смена профиля";
+                case "Site Change": return "Смена канюли";
+                case "Sensor Change": return "Смена сенсора";
+                case "Insulin Cartridge Change": return "Смена картриджа";
+                case "Sensor Start": return "Старт сенсора";
+                default: return raw;
+            }
         }
 
         private async void LoadTreatmentsAsync()
@@ -46,7 +69,7 @@ namespace XDripWidget
                     _items.Add(new TreatmentViewItem
                     {
                         Id = t.Id,
-                        EventType = t.EventType,
+                        EventType = FormatEventType(t.EventType),
                         DateStr = t.Date.ToString("dd.MM.yyyy HH:mm"),
                         InsulinStr = t.Insulin > 0 ? string.Format(CultureInfo.InvariantCulture, "{0:F1} ЕД", t.Insulin) : "—",
                         CarbsStr = t.Carbs > 0 ? string.Format(CultureInfo.InvariantCulture, "{0:F0} г", t.Carbs) : "—",

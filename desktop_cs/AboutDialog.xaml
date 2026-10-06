@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="О программе xDripWidget"
         Icon="app.ico"
-        Width="440" Height="420"
+        Width="485" Height="465"
         WindowStartupLocation="Manual"
         ResizeMode="NoResize"
         Background="#0F172A"
@@ -28,7 +28,11 @@
         </Grid.RowDefinitions>
 
         <StackPanel Grid.Row="0" Margin="0,0,0,12">
-            <TextBlock Text="🩸 xDripWidget (C# .NET Edition)" FontSize="18" FontWeight="Bold" Foreground="#38BDF8"/>
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                <Path Data="M 10,2 C 10,2 3,12 3,16 C 3,19.9 6.1,23 10,23 C 13.9,23 17,19.9 17,16 C 17,12 10,2 10,2 Z"
+                      Fill="#EF4444" Width="16" Height="20" Stretch="Uniform" VerticalAlignment="Center" Margin="0,0,8,2"/>
+                <TextBlock Text="xDripWidget (C# .NET Edition)" FontSize="18" FontWeight="Bold" Foreground="#38BDF8" VerticalAlignment="Center"/>
+            </StackPanel>
             <TextBlock Text="Версия 1.9.0 • Размер ~35 КБ" FontSize="13" Foreground="#94A3B8" Margin="0,4,0,0"/>
             <TextBlock Text="Автор: Evgeniy Krasnyanskiy" FontSize="12" Foreground="#64748B"/>
         </StackPanel>

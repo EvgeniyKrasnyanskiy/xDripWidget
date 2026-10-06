@@ -57,16 +57,19 @@
             </Setter>
         </Style>
 
-        <!-- Custom Separator Style (1px dark slate line) -->
-        <Style TargetType="Separator">
+        <!-- Custom Separator Style (1px dark slate line across full width) -->
+        <Style x:Key="{x:Static MenuItem.SeparatorStyleKey}" TargetType="Separator">
+            <Setter Property="OverridesDefaultStyle" Value="True"/>
+            <Setter Property="SnapsToDevicePixels" Value="True"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Separator">
-                        <Border Height="1" Background="#334155" Margin="8,4"/>
+                        <Border Height="1" Background="#334155" Margin="8,4" HorizontalAlignment="Stretch"/>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
         </Style>
+        <Style TargetType="Separator" BasedOn="{StaticResource {x:Static MenuItem.SeparatorStyleKey}}"/>
     </Window.Resources>
     <Window.ContextMenu>
         <ContextMenu>

@@ -157,7 +157,7 @@
 
         <!-- Date & Time -->
         <Label Grid.Row="3" Grid.Column="0" Content="Время:" Foreground="#94A3B8"/>
-        <TextBox Grid.Row="3" Grid.Column="1" x:Name="TxtDateTime" BorderBrush="#334155" BorderThickness="1" Margin="0,6" FontWeight="Normal" FontSize="13" Foreground="#CBD5E1"/>
+        <TextBox Grid.Row="3" Grid.Column="1" x:Name="TxtDateTime" BorderBrush="#475569" BorderThickness="1.5" Margin="0,6" FontWeight="Normal" FontSize="13" Foreground="#E2E8F0"/>
 
         <!-- Buttons -->
         <StackPanel Grid.Row="4" Grid.ColumnSpan="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,18,0,6">

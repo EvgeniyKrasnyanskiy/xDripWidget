@@ -14,6 +14,7 @@ namespace XDripWidget
         public TreatmentDialog(ApiClient apiClient, string baseUrl, string apiSecret)
         {
             InitializeComponent();
+            DarkThemeHelper.ApplyDarkTitleBar(this);
             _apiClient = apiClient;
             _baseUrl = baseUrl;
             _apiSecret = apiSecret;
