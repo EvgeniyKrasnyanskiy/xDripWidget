@@ -24,6 +24,8 @@ if not exist "..\dist" (
     mkdir "..\dist"
 )
 
+taskkill /F /IM xDripWidget-CS.exe 2>nul
+timeout /t 1 /nobreak >nul
 copy /Y "bin\Release\xDripWidget-CS.exe" "..\dist\xDripWidget-CS.exe" >nul
 echo.
 echo ========================================================

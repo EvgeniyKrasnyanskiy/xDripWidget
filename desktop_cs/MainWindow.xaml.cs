@@ -18,9 +18,9 @@ namespace XDripWidget
         private readonly ApiClient _apiClient = new ApiClient();
         private readonly DispatcherTimer _timer = new DispatcherTimer();
         private Forms.NotifyIcon _notifyIcon;
-        private Forms.MenuItem _trayClickThroughItem;
-        private Forms.MenuItem _trayCompactItem;
-        private Forms.MenuItem _trayAcrylicItem;
+        private Forms.ToolStripMenuItem _trayClickThroughItem;
+        private Forms.ToolStripMenuItem _trayCompactItem;
+        private Forms.ToolStripMenuItem _trayAcrylicItem;
         private System.Windows.Point? _dragStartScreenPos;
         private bool _isFetching = false;
 
@@ -105,25 +105,32 @@ namespace XDripWidget
                 Icon = CreateBloodDropIcon(System.Drawing.Color.FromArgb(148, 163, 184))
             };
 
-            var contextMenu = new Forms.ContextMenu();
-            contextMenu.MenuItems.Add("Показать / Скрыть", (s, e) => ToggleVisibility());
-            contextMenu.MenuItems.Add("Обновить сейчас", (s, e) => FetchDataAsync());
-            contextMenu.MenuItems.Add("Ввести терапию", (s, e) => Dispatcher.Invoke((Action)(() => MenuTreatments_Click(this, new RoutedEventArgs()))));
+            var contextMenu = new Forms.ContextMenuStrip();
+            contextMenu.Renderer = new DarkToolStripRenderer();
+            contextMenu.ShowImageMargin = false;
+            contextMenu.ShowCheckMargin = true;
+            contextMenu.Font = new System.Drawing.Font("Segoe UI", 9.5f);
+
+            contextMenu.Items.Add("Показать / Скрыть", null, (s, e) => ToggleVisibility());
+            contextMenu.Items.Add("Обновить сейчас", null, (s, e) => FetchDataAsync());
+            contextMenu.Items.Add("Ввести терапию", null, (s, e) => Dispatcher.Invoke((Action)(() => MenuTreatments_Click(this, new RoutedEventArgs()))));
+            contextMenu.Items.Add(new Forms.ToolStripSeparator());
             
-            _trayCompactItem = new Forms.MenuItem("Компактный режим («Мини-пилюля»)", (s, e) => Dispatcher.Invoke((Action)(() => SetCompactMode(!_config.CompactMode))));
+            _trayCompactItem = new Forms.ToolStripMenuItem("Компактный режим («Мини-пилюля»)", null, (s, e) => Dispatcher.Invoke((Action)(() => SetCompactMode(!_config.CompactMode))));
             _trayCompactItem.Checked = _config.CompactMode;
-            contextMenu.MenuItems.Add(_trayCompactItem);
+            contextMenu.Items.Add(_trayCompactItem);
 
-            _trayClickThroughItem = new Forms.MenuItem("Режим «Призрак» (сквозной клик)", (s, e) => ToggleClickThrough());
+            _trayClickThroughItem = new Forms.ToolStripMenuItem("Режим «Призрак» (сквозной клик)", null, (s, e) => ToggleClickThrough());
             _trayClickThroughItem.Checked = _config.ClickThrough;
-            contextMenu.MenuItems.Add(_trayClickThroughItem);
+            contextMenu.Items.Add(_trayClickThroughItem);
 
-            _trayAcrylicItem = new Forms.MenuItem("Матовое стекло (Acrylic Blur)", (s, e) => Dispatcher.Invoke((Action)(() => SetAcrylicBlur(!_config.AcrylicBlur))));
+            _trayAcrylicItem = new Forms.ToolStripMenuItem("Матовое стекло (Acrylic Blur)", null, (s, e) => Dispatcher.Invoke((Action)(() => SetAcrylicBlur(!_config.AcrylicBlur))));
             _trayAcrylicItem.Checked = _config.AcrylicBlur;
-            contextMenu.MenuItems.Add(_trayAcrylicItem);
+            contextMenu.Items.Add(_trayAcrylicItem);
+            contextMenu.Items.Add(new Forms.ToolStripSeparator());
 
-            contextMenu.MenuItems.Add("Выход", (s, e) => Dispatcher.Invoke((Action)ConfirmAndQuit));
-            _notifyIcon.ContextMenu = contextMenu;
+            contextMenu.Items.Add("Выход", null, (s, e) => Dispatcher.Invoke((Action)ConfirmAndQuit));
+            _notifyIcon.ContextMenuStrip = contextMenu;
 
             _notifyIcon.MouseClick += (s, e) =>
             {
@@ -540,20 +547,86 @@ namespace XDripWidget
                 _trayCompactItem.Checked = compact;
             }
 
-            if (compact)
+            double oldW = Width;
+            double oldH = Height;
+            double targetW = compact ? CompactWidth : NormalWidth;
+            double targetH = compact ? CompactHeight : NormalHeight;
+
+            // Preserve edge snapping if previously snapped
+            bool wasSnappedRight = false;
+            bool wasSnappedBottom = false;
+            bool wasSnappedLeft = false;
+            bool wasSnappedTop = false;
+
+            double workLeft = 0, workTop = 0, workRight = 0, workBottom = 0;
+            try
             {
-                Width = CompactWidth;
-                Height = CompactHeight;
-                CanvasElement.IsCompact = true;
+                var helper = new WindowInteropHelper(this);
+                if (helper.Handle != IntPtr.Zero)
+                {
+                    var screen = Forms.Screen.FromHandle(helper.Handle);
+                    var source = PresentationSource.FromVisual(this);
+                    double dpiX = (source != null && source.CompositionTarget != null) ? source.CompositionTarget.TransformToDevice.M11 : 1.0;
+                    double dpiY = (source != null && source.CompositionTarget != null) ? source.CompositionTarget.TransformToDevice.M22 : 1.0;
+                    if (dpiX > 0 && dpiY > 0)
+                    {
+                        workLeft = screen.WorkingArea.Left / dpiX;
+                        workTop = screen.WorkingArea.Top / dpiY;
+                        workRight = screen.WorkingArea.Right / dpiX;
+                        workBottom = screen.WorkingArea.Bottom / dpiY;
+
+                        const double snapDips = 25.0;
+                        wasSnappedLeft = Math.Abs(Left - workLeft) <= snapDips;
+                        wasSnappedRight = Math.Abs((Left + oldW) - workRight) <= snapDips;
+                        wasSnappedTop = Math.Abs(Top - workTop) <= snapDips;
+                        wasSnappedBottom = Math.Abs((Top + oldH) - workBottom) <= snapDips;
+                    }
+                }
             }
-            else
+            catch { }
+
+            Width = targetW;
+            Height = targetH;
+            CanvasElement.IsCompact = compact;
+
+            if (wasSnappedRight)
             {
-                Width = NormalWidth;
-                Height = NormalHeight;
-                CanvasElement.IsCompact = false;
+                Left = workRight - targetW;
             }
+            else if (wasSnappedLeft)
+            {
+                Left = workLeft;
+            }
+
+            if (wasSnappedBottom)
+            {
+                Top = workBottom - targetH;
+            }
+            else if (wasSnappedTop)
+            {
+                Top = workTop;
+            }
+
+            // Ensure window stays within screen bounds if size grew
+            if (workRight > 0 && (Left + targetW) > workRight)
+            {
+                Left = workRight - targetW;
+            }
+            if (workBottom > 0 && (Top + targetH) > workBottom)
+            {
+                Top = workBottom - targetH;
+            }
+            if (workLeft > 0 && Left < workLeft)
+            {
+                Left = workLeft;
+            }
+            if (workTop > 0 && Top < workTop)
+            {
+                Top = workTop;
+            }
+
             CanvasElement.InvalidateVisual();
-            SnapToScreenEdges();
+            _config.SavePosition(Left, Top);
         }
 
         private void MenuAcrylicBlur_Click(object sender, RoutedEventArgs e)
@@ -894,14 +967,24 @@ namespace XDripWidget
 
         private bool _isConfirmedQuit = false;
 
+        private bool ShowConfirmExitDialog()
+        {
+            var dlg = new ConfirmExitDialog();
+            if (this.IsVisible && this.WindowState != WindowState.Minimized)
+            {
+                dlg.Owner = this;
+                PositionDialogNearWidget(dlg);
+            }
+            else
+            {
+                dlg.WindowStartupLocation = WindowStartupLocation.CenterScreen;
+            }
+            return dlg.ShowDialog() == true;
+        }
+
         private void ConfirmAndQuit()
         {
-            Window owner = (this.IsVisible && this.WindowState != WindowState.Minimized) ? this : null;
-            var res = owner != null
-                ? MessageBox.Show(owner, "Вы действительно хотите выйти из xDrip Widget?", "Выход из программы", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No)
-                : MessageBox.Show("Вы действительно хотите выйти из xDrip Widget?", "Выход из программы", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No);
-
-            if (res == MessageBoxResult.Yes)
+            if (ShowConfirmExitDialog())
             {
                 _isConfirmedQuit = true;
                 Close();
@@ -912,12 +995,7 @@ namespace XDripWidget
         {
             if (!_isConfirmedQuit)
             {
-                Window owner = (this.IsVisible && this.WindowState != WindowState.Minimized) ? this : null;
-                var res = owner != null
-                    ? MessageBox.Show(owner, "Вы действительно хотите выйти из xDrip Widget?", "Выход из программы", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No)
-                    : MessageBox.Show("Вы действительно хотите выйти из xDrip Widget?", "Выход из программы", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No);
-
-                if (res != MessageBoxResult.Yes)
+                if (!ShowConfirmExitDialog())
                 {
                     e.Cancel = true;
                     return;

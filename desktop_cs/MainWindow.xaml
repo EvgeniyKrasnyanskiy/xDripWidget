@@ -35,7 +35,7 @@
             </Setter>
         </Style>
 
-        <!-- Custom MenuItem Style (dark theme, Action Blue hover) -->
+        <!-- Custom MenuItem Style (dark theme, Action Blue hover, Checkmark support) -->
         <Style TargetType="MenuItem">
             <Setter Property="Foreground" Value="#F8FAFC"/>
             <Setter Property="FontSize" Value="13"/>
@@ -43,14 +43,39 @@
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="MenuItem">
-                        <Border x:Name="Border" Background="Transparent" CornerRadius="4" Padding="12,6,20,6" Margin="1">
-                            <ContentPresenter ContentSource="Header" HorizontalAlignment="Left" VerticalAlignment="Center"/>
+                        <Border x:Name="Border" Background="Transparent" CornerRadius="4" Padding="10,6,16,6" Margin="1">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="22"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Path x:Name="CheckGlyph" Grid.Column="0"
+                                      Data="M 1,6 L 4,9 L 10,2"
+                                      Stroke="#38BDF8" StrokeThickness="2"
+                                      StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                      Width="12" Height="12"
+                                      HorizontalAlignment="Left" VerticalAlignment="Center"
+                                      Visibility="Collapsed"/>
+                                <ContentPresenter Grid.Column="1" ContentSource="Header" HorizontalAlignment="Left" VerticalAlignment="Center"/>
+                            </Grid>
                         </Border>
                         <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="CheckGlyph" Property="Visibility" Value="Visible"/>
+                                <Setter Property="Foreground" Value="#38BDF8"/>
+                            </Trigger>
                             <Trigger Property="IsHighlighted" Value="True">
                                 <Setter TargetName="Border" Property="Background" Value="#0284C7"/>
                                 <Setter Property="Foreground" Value="#FFFFFF"/>
                             </Trigger>
+                            <MultiTrigger>
+                                <MultiTrigger.Conditions>
+                                    <Condition Property="IsHighlighted" Value="True"/>
+                                    <Condition Property="IsChecked" Value="True"/>
+                                </MultiTrigger.Conditions>
+                                <Setter TargetName="CheckGlyph" Property="Stroke" Value="#FFFFFF"/>
+                                <Setter Property="Foreground" Value="#FFFFFF"/>
+                            </MultiTrigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
