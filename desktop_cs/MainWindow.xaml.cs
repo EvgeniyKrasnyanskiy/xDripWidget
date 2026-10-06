@@ -26,7 +26,7 @@ namespace XDripWidget
 
         private const double NormalWidth = 220;
         private const double NormalHeight = 145;
-        private const double CompactWidth = 175;
+        private const double CompactWidth = 136;
         private const double CompactHeight = 36;
 
         private DateTime _lastHypoAlert = DateTime.MinValue;
