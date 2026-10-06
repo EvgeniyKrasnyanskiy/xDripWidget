@@ -10,14 +10,17 @@ namespace XDripWidget
     {
         private Mutex _singleInstanceMutex;
 
-        [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
-        private static extern uint RegisterWindowMessage(string lpString);
+        [DllImport("user32.dll")]
+        private static extern IntPtr FindWindow(string lpClassName, string lpWindowName);
 
         [DllImport("user32.dll")]
-        private static extern bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+        private static extern bool SetForegroundWindow(IntPtr hWnd);
 
-        private static readonly IntPtr HWND_BROADCAST = new IntPtr(0xffff);
-        public static readonly uint WM_SHOWWIDGET = RegisterWindowMessage("XDripWidget_ShowWindow_Msg");
+        [DllImport("user32.dll")]
+        private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+        private const int SW_RESTORE = 9;
+        private const int SW_SHOW = 5;
 
         private void Application_Startup(object sender, StartupEventArgs e)
         {
@@ -38,9 +41,12 @@ namespace XDripWidget
             if (!createdNew)
             {
                 // Silently wake up existing instance and bring to front without annoying popups
-                if (WM_SHOWWIDGET != 0)
+                IntPtr hwnd = FindWindow(null, "xDripWidget");
+                if (hwnd != IntPtr.Zero)
                 {
-                    PostMessage(HWND_BROADCAST, WM_SHOWWIDGET, IntPtr.Zero, IntPtr.Zero);
+                    ShowWindow(hwnd, SW_RESTORE);
+                    ShowWindow(hwnd, SW_SHOW);
+                    SetForegroundWindow(hwnd);
                 }
                 Shutdown();
                 return;

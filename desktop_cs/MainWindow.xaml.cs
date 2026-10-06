@@ -478,24 +478,6 @@ namespace XDripWidget
                 handled = true;
                 return IntPtr.Zero;
             }
-            else if (App.WM_SHOWWIDGET != 0 && (uint)msg == App.WM_SHOWWIDGET)
-            {
-                Dispatcher.BeginInvoke((Action)(() =>
-                {
-                    if (Visibility != Visibility.Visible)
-                    {
-                        Show();
-                    }
-                    if (WindowState == WindowState.Minimized)
-                    {
-                        WindowState = WindowState.Normal;
-                    }
-                    Activate();
-                    Topmost = true;
-                }));
-                handled = true;
-                return IntPtr.Zero;
-            }
             return IntPtr.Zero;
         }
 
