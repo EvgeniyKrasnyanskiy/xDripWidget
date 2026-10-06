@@ -331,7 +331,7 @@ namespace XDripWidget
             dc.DrawRoundedRectangle(pillBgBrush, pillBorderPen, new Rect(0.5, 0.5, w - 1.0, h - 1.0), radius, radius);
 
             Color pillStatusColor = _data != null ? Constants.GetGlucoseColor(_data.Mmol, _data.IsStale) : Constants.ColorGray;
-            dc.DrawEllipse(new SolidColorBrush(pillStatusColor), null, new Point(13, h / 2.0), 3.5, 3.5);
+            dc.DrawEllipse(new SolidColorBrush(pillStatusColor), null, new Point(12, h / 2.0), 3.5, 3.5);
 
             if (_isLoading && _data == null && string.IsNullOrEmpty(_errorMessage))
             {
@@ -347,14 +347,53 @@ namespace XDripWidget
 
             string arrow = Constants.GetTrendArrow(_data.Direction);
             string glucoseText = string.Format(CultureInfo.InvariantCulture, "{0:F1} {1}", _data.Mmol, arrow);
-            var glucoseFt = CreateFormattedText(glucoseText, _typefaceBig, 16, pillStatusColor);
+            var glucoseFt = CreateFormattedText(glucoseText, _typefaceBig, 15.5, pillStatusColor);
 
             string deltaText = string.Format("({0})", _data.Delta);
-            var deltaFt = CreateFormattedText(deltaText, _typefaceMed, 12, Constants.ColorSub);
+            var deltaFt = CreateFormattedText(deltaText, _typefaceMed, 11, Constants.ColorSub);
 
-            double textStartX = 22;
+            double textStartX = 20;
             dc.DrawText(glucoseFt, new Point(textStartX, (h - glucoseFt.Height) / 2.0));
-            dc.DrawText(deltaFt, new Point(textStartX + glucoseFt.Width + 5, (h - deltaFt.Height) / 2.0 + 1));
+            dc.DrawText(deltaFt, new Point(textStartX + glucoseFt.Width + 4, (h - deltaFt.Height) / 2.0 + 1));
+
+            // Mini battery bar on the right
+            if (_data.Battery >= 0)
+            {
+                int pct = _data.Battery;
+                Color bColor = (pct <= 5) ? Constants.ColorVeryLow : Constants.GetBatteryColor(pct, _data.IsStale);
+
+                string bText = string.Format("{0}%", pct);
+                var pctFt = CreateFormattedText(bText, _typefaceMed, 10, bColor);
+
+                const double bWidth = 16;
+                const double bHeight = 8;
+                const double capW = 2;
+                const double capH = 4;
+
+                double totalBW = bWidth + capW + 4 + pctFt.Width;
+                double bStartX = w - 14 - totalBW;
+                double bStartY = (h - bHeight) / 2.0;
+
+                var borderPen = new Pen(new SolidColorBrush(Constants.ColorBorder), 1.0);
+
+                // Battery body
+                dc.DrawRoundedRectangle(null, borderPen, new Rect(bStartX, bStartY, bWidth, bHeight), 1.5, 1.5);
+
+                // Battery fill
+                if (pct > 0)
+                {
+                    double fillW = Math.Max(1.5, (bWidth - 3) * Math.Min(pct, 100) / 100.0);
+                    dc.DrawRoundedRectangle(new SolidColorBrush(bColor), null, new Rect(bStartX + 1.5, bStartY + 1.5, fillW, bHeight - 3), 1, 1);
+                }
+
+                // Battery cap
+                double capX = bStartX + bWidth + 0.5;
+                double capY = bStartY + (bHeight - capH) / 2.0;
+                dc.DrawRoundedRectangle(new SolidColorBrush(Constants.ColorBorder), null, new Rect(capX, capY, capW, capH), 0.5, 0.5);
+
+                // Percentage text
+                dc.DrawText(pctFt, new Point(capX + capW + 3, (h - pctFt.Height) / 2.0));
+            }
         }
     }
 }

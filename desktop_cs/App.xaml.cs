@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Windows;
 
@@ -8,6 +9,15 @@ namespace XDripWidget
     public partial class App : Application
     {
         private Mutex _singleInstanceMutex;
+
+        [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+        private static extern uint RegisterWindowMessage(string lpString);
+
+        [DllImport("user32.dll")]
+        private static extern bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+
+        private static readonly IntPtr HWND_BROADCAST = new IntPtr(0xffff);
+        public static readonly uint WM_SHOWWIDGET = RegisterWindowMessage("XDripWidget_ShowWindow_Msg");
 
         private void Application_Startup(object sender, StartupEventArgs e)
         {
@@ -27,7 +37,11 @@ namespace XDripWidget
             _singleInstanceMutex = new Mutex(true, "Local\\XDripWidget_SingleInstance_Mutex", out createdNew);
             if (!createdNew)
             {
-                MessageBox.Show("Экземпляр xDripWidget уже запущен.", "xDripWidget", MessageBoxButton.OK, MessageBoxImage.Information);
+                // Silently wake up existing instance and bring to front without annoying popups
+                if (WM_SHOWWIDGET != 0)
+                {
+                    PostMessage(HWND_BROADCAST, WM_SHOWWIDGET, IntPtr.Zero, IntPtr.Zero);
+                }
                 Shutdown();
                 return;
             }

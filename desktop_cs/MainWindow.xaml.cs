@@ -26,7 +26,7 @@ namespace XDripWidget
 
         private const double NormalWidth = 220;
         private const double NormalHeight = 145;
-        private const double CompactWidth = 140;
+        private const double CompactWidth = 175;
         private const double CompactHeight = 36;
 
         private DateTime _lastHypoAlert = DateTime.MinValue;
@@ -270,6 +270,16 @@ namespace XDripWidget
                 }
             }
 
+            // 6. Critical Low Battery (<= 5%)
+            if (data.Battery > 0 && data.Battery <= 5)
+            {
+                isAlert = true;
+                if (data.Mmol > _config.ThresholdUrgentLow && data.Mmol < _config.ThresholdUrgentHigh)
+                {
+                    alertColor = Constants.ColorVeryLow;
+                }
+            }
+
             // Visual pulsing alert
             if (_config.VisualAlertsEnabled && isAlert)
             {
@@ -464,6 +474,24 @@ namespace XDripWidget
                 Dispatcher.BeginInvoke((Action)(() =>
                 {
                     MenuTreatments_Click(this, new RoutedEventArgs());
+                }));
+                handled = true;
+                return IntPtr.Zero;
+            }
+            else if (App.WM_SHOWWIDGET != 0 && (uint)msg == App.WM_SHOWWIDGET)
+            {
+                Dispatcher.BeginInvoke((Action)(() =>
+                {
+                    if (Visibility != Visibility.Visible)
+                    {
+                        Show();
+                    }
+                    if (WindowState == WindowState.Minimized)
+                    {
+                        WindowState = WindowState.Normal;
+                    }
+                    Activate();
+                    Topmost = true;
                 }));
                 handled = true;
                 return IntPtr.Zero;
