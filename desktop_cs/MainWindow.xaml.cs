@@ -239,10 +239,102 @@ namespace XDripWidget
             Hide();
         }
 
+        private void PositionDialogNearWidget(Window dlg)
+        {
+            dlg.WindowStartupLocation = WindowStartupLocation.Manual;
+
+            double workLeft = SystemParameters.WorkArea.Left;
+            double workTop = SystemParameters.WorkArea.Top;
+            double workRight = SystemParameters.WorkArea.Right;
+            double workBottom = SystemParameters.WorkArea.Bottom;
+
+            try
+            {
+                var helper = new System.Windows.Interop.WindowInteropHelper(this);
+                if (helper.Handle != IntPtr.Zero)
+                {
+                    var screen = Forms.Screen.FromHandle(helper.Handle);
+                    var source = PresentationSource.FromVisual(this);
+                    double dpiX = 1.0;
+                    double dpiY = 1.0;
+                    if (source != null && source.CompositionTarget != null)
+                    {
+                        dpiX = source.CompositionTarget.TransformToDevice.M11;
+                        dpiY = source.CompositionTarget.TransformToDevice.M22;
+                    }
+
+                    if (dpiX > 0 && dpiY > 0)
+                    {
+                        workLeft = screen.WorkingArea.Left / dpiX;
+                        workTop = screen.WorkingArea.Top / dpiY;
+                        workRight = screen.WorkingArea.Right / dpiX;
+                        workBottom = screen.WorkingArea.Bottom / dpiY;
+                    }
+                }
+            }
+            catch
+            {
+                // Fallback to SystemParameters.WorkArea
+            }
+
+            double dlgWidth = dlg.Width > 0 ? dlg.Width : 400;
+            double dlgHeight = dlg.Height > 0 ? dlg.Height : 300;
+            if (double.IsNaN(dlg.Height) || dlg.Height <= 0)
+            {
+                dlg.Measure(new System.Windows.Size(dlgWidth, double.PositiveInfinity));
+                if (dlg.DesiredSize.Height > 0)
+                {
+                    dlgHeight = dlg.DesiredSize.Height;
+                }
+            }
+
+            const double margin = 10;
+            double widgetWidth = ActualWidth > 0 ? ActualWidth : Width;
+            double targetLeft;
+            double targetTop = Top;
+
+            // Prefer right, fallback to left
+            if (Left + widgetWidth + margin + dlgWidth <= workRight)
+            {
+                targetLeft = Left + widgetWidth + margin;
+            }
+            else if (Left - margin - dlgWidth >= workLeft)
+            {
+                targetLeft = Left - margin - dlgWidth;
+            }
+            else
+            {
+                // Clamp within screen boundaries
+                targetLeft = Math.Max(workLeft + margin, workRight - dlgWidth - margin);
+            }
+
+            // Align vertically with widget and clamp within working area
+            if (targetTop + dlgHeight > workBottom)
+            {
+                targetTop = Math.Max(workTop + margin, workBottom - dlgHeight - margin);
+            }
+            if (targetTop < workTop)
+            {
+                targetTop = workTop + margin;
+            }
+
+            dlg.Left = targetLeft;
+            dlg.Top = targetTop;
+
+            dlg.Loaded += (s, args) =>
+            {
+                if (dlg.ActualHeight > 0 && dlg.Top + dlg.ActualHeight > workBottom)
+                {
+                    dlg.Top = Math.Max(workTop + margin, workBottom - dlg.ActualHeight - margin);
+                }
+            };
+        }
+
         private void MenuTreatments_Click(object sender, RoutedEventArgs e)
         {
             var dlg = new TreatmentDialog(_apiClient, _config.ServerUrl, _config.ApiSecret);
             dlg.Owner = this;
+            PositionDialogNearWidget(dlg);
             if (dlg.ShowDialog() == true)
             {
                 FetchDataAsync();
@@ -253,6 +345,7 @@ namespace XDripWidget
         {
             var dlg = new TreatmentHistoryDialog(_apiClient, _config.ServerUrl, _config.ApiSecret);
             dlg.Owner = this;
+            PositionDialogNearWidget(dlg);
             dlg.ShowDialog();
         }
 
@@ -260,6 +353,7 @@ namespace XDripWidget
         {
             var dlg = new SettingsDialog(_config);
             dlg.Owner = this;
+            PositionDialogNearWidget(dlg);
             if (dlg.ShowDialog() == true)
             {
                 Opacity = Math.Max(0.3, Math.Min(1.0, (100 - _config.Transparency) / 100.0));
@@ -273,6 +367,7 @@ namespace XDripWidget
         {
             var dlg = new AboutDialog();
             dlg.Owner = this;
+            PositionDialogNearWidget(dlg);
             dlg.ShowDialog();
         }
 

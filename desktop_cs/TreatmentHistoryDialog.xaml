@@ -4,7 +4,7 @@
         Title="История терапий"
         Icon="app.ico"
         Width="640" Height="400"
-        WindowStartupLocation="CenterScreen"
+        WindowStartupLocation="Manual"
         Background="#0F172A"
         Foreground="#F8FAFC">
     <Window.Resources>

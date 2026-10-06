@@ -40,3 +40,9 @@
 ### 6. Скрипт сборки и верификация [Completed]
 - [x] `desktop_cs/build.bat` — сборка проекта через встроенный `MSBuild.exe` и копирование в `dist/xDripWidget-CS.exe`.
 - [x] Тестирование сборки, запуск, проверка размера исполняемого файла (35 КБ).
+
+### 7. Умное позиционирование диалоговых окон рядом с виджетом [Completed]
+- [x] Метод расчета координат `PositionDialogNearWidget(Window dlg)` в `desktop_cs/MainWindow.xaml.cs` с учетом границ монитора и DPI.
+- [x] Перевод диалогов на `WindowStartupLocation="Manual"` (`TreatmentDialog`, `SettingsDialog`, `TreatmentHistoryDialog`, `AboutDialog`).
+- [x] Применение позиционирования при вызове окон из меню.
+- [x] Верификация компиляции и тестирования.

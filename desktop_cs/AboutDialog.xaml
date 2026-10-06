@@ -4,7 +4,7 @@
         Title="О программе xDripWidget"
         Icon="app.ico"
         Width="440" Height="420"
-        WindowStartupLocation="CenterScreen"
+        WindowStartupLocation="Manual"
         ResizeMode="NoResize"
         Background="#0F172A"
         Foreground="#F8FAFC">
