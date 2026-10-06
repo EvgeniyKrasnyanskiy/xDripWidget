@@ -21,6 +21,8 @@ namespace XDripWidget
         public int RefreshIntervalMinutes { get; set; }
         public double WindowX { get; set; }
         public double WindowY { get; set; }
+        public string TreatmentHotkey { get; set; }
+        public bool ClickThrough { get; set; }
 
         public Config()
         {
@@ -30,6 +32,8 @@ namespace XDripWidget
             RefreshIntervalMinutes = 1;
             WindowX = -1;
             WindowY = -1;
+            TreatmentHotkey = "Ctrl+Alt+D";
+            ClickThrough = false;
 
             _configPath = GetConfigFilePath();
             Load();
@@ -93,6 +97,13 @@ namespace XDripWidget
             string yStr = ReadKey("Position", "y", "-1");
             double y;
             if (double.TryParse(yStr, out y)) WindowY = y;
+
+            TreatmentHotkey = ReadKey("General", "hotkey_treatment", "Ctrl+Alt+D");
+            bool ct;
+            if (bool.TryParse(ReadKey("General", "click_through", "false"), out ct))
+            {
+                ClickThrough = ct;
+            }
         }
 
         public void Save()
@@ -103,6 +114,8 @@ namespace XDripWidget
                 WriteKey("General", "api_secret", ApiSecret);
                 WriteKey("General", "transparency", Transparency.ToString());
                 WriteKey("General", "refresh_interval", RefreshIntervalMinutes.ToString());
+                WriteKey("General", "hotkey_treatment", TreatmentHotkey ?? "");
+                WriteKey("General", "click_through", ClickThrough ? "true" : "false");
                 if (WindowX >= 0 && WindowY >= 0)
                 {
                     WriteKey("Position", "x", WindowX.ToString("F0"));
@@ -118,6 +131,12 @@ namespace XDripWidget
             WindowY = y;
             WriteKey("Position", "x", x.ToString("F0"));
             WriteKey("Position", "y", y.ToString("F0"));
+        }
+
+        public void SaveClickThrough(bool enabled)
+        {
+            ClickThrough = enabled;
+            WriteKey("General", "click_through", enabled ? "true" : "false");
         }
 
         private string ReadKey(string section, string key, string defaultValue)

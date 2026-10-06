@@ -74,6 +74,8 @@
             <MenuItem Header="История / Удаление терапий" Click="MenuHistory_Click"/>
             <MenuItem Header="Свернуть в трей" Click="MenuHide_Click"/>
             <Separator/>
+            <MenuItem x:Name="MenuClickThrough" Header="Режим «Призрак» (сквозной клик)" IsCheckable="True" Click="MenuClickThrough_Click"/>
+            <Separator/>
             <MenuItem Header="Настройки…" Click="MenuSettings_Click"/>
             <MenuItem Header="О программе" Click="MenuAbout_Click"/>
             <Separator/>

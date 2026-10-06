@@ -18,6 +18,7 @@ namespace XDripWidget
         private readonly ApiClient _apiClient = new ApiClient();
         private readonly DispatcherTimer _timer = new DispatcherTimer();
         private Forms.NotifyIcon _notifyIcon;
+        private Forms.MenuItem _trayClickThroughItem;
         private System.Windows.Point? _dragStartScreenPos;
         private bool _isFetching = false;
 
@@ -60,12 +61,21 @@ namespace XDripWidget
             // Initial fetch
             FetchDataAsync();
 
-            // Hook Win32 messages for real-time edge snapping
+            // Hook Win32 messages for real-time edge snapping and hotkeys
             var helper = new WindowInteropHelper(this);
             var source = HwndSource.FromHwnd(helper.Handle);
             if (source != null)
             {
                 source.AddHook(WndProc);
+            }
+
+            // Register global hotkey
+            UpdateGlobalHotkey();
+
+            // Apply click-through mode if saved
+            if (_config.ClickThrough)
+            {
+                SetClickThrough(true);
             }
         }
 
@@ -81,6 +91,10 @@ namespace XDripWidget
             var contextMenu = new Forms.ContextMenu();
             contextMenu.MenuItems.Add("Показать / Скрыть", (s, e) => ToggleVisibility());
             contextMenu.MenuItems.Add("Обновить сейчас", (s, e) => FetchDataAsync());
+            contextMenu.MenuItems.Add("Ввести терапию", (s, e) => Dispatcher.Invoke((Action)(() => MenuTreatments_Click(this, new RoutedEventArgs()))));
+            _trayClickThroughItem = new Forms.MenuItem("Режим «Призрак» (сквозной клик)", (s, e) => ToggleClickThrough());
+            _trayClickThroughItem.Checked = _config.ClickThrough;
+            contextMenu.MenuItems.Add(_trayClickThroughItem);
             contextMenu.MenuItems.Add("Выход", (s, e) => Dispatcher.Invoke((Action)ConfirmAndQuit));
             _notifyIcon.ContextMenu = contextMenu;
 
@@ -242,7 +256,30 @@ namespace XDripWidget
         }
 
         private const int WM_MOVING = 0x0216;
+        private const int WM_HOTKEY = 0x0312;
+        private const int HOTKEY_TREATMENT_ID = 9001;
+
+        private const uint MOD_ALT = 0x0001;
+        private const uint MOD_CONTROL = 0x0002;
+        private const uint MOD_SHIFT = 0x0004;
+        private const uint MOD_WIN = 0x0008;
+        private const uint MOD_NOREPEAT = 0x4000;
+
+        private const int GWL_EXSTYLE = -20;
+        private const int WS_EX_TRANSPARENT = 0x00000020;
         private const int SnapThresholdPx = 20;
+
+        [DllImport("user32.dll")]
+        private static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
+
+        [DllImport("user32.dll")]
+        private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern int GetWindowLong(IntPtr hWnd, int nIndex);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
 
         private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
         {
@@ -285,7 +322,124 @@ namespace XDripWidget
                 handled = true;
                 return (IntPtr)1;
             }
+            else if (msg == WM_HOTKEY && wParam.ToInt32() == HOTKEY_TREATMENT_ID)
+            {
+                Dispatcher.BeginInvoke((Action)(() =>
+                {
+                    MenuTreatments_Click(this, new RoutedEventArgs());
+                }));
+                handled = true;
+                return IntPtr.Zero;
+            }
             return IntPtr.Zero;
+        }
+
+        private void ToggleClickThrough()
+        {
+            SetClickThrough(!_config.ClickThrough);
+        }
+
+        private void MenuClickThrough_Click(object sender, RoutedEventArgs e)
+        {
+            SetClickThrough(MenuClickThrough.IsChecked);
+        }
+
+        private void SetClickThrough(bool enable)
+        {
+            try
+            {
+                var helper = new WindowInteropHelper(this);
+                if (helper.Handle != IntPtr.Zero)
+                {
+                    int exStyle = GetWindowLong(helper.Handle, GWL_EXSTYLE);
+                    if (enable)
+                    {
+                        SetWindowLong(helper.Handle, GWL_EXSTYLE, exStyle | WS_EX_TRANSPARENT);
+                    }
+                    else
+                    {
+                        SetWindowLong(helper.Handle, GWL_EXSTYLE, exStyle & ~WS_EX_TRANSPARENT);
+                    }
+                }
+                _config.SaveClickThrough(enable);
+                UpdateClickThroughUI(enable);
+
+                if (enable && _notifyIcon != null)
+                {
+                    _notifyIcon.ShowBalloonTip(3500, "xDripWidget: Режим «Призрак»", "Сквозной клик активен. Отключить можно через контекстное меню иконки в трее.", Forms.ToolTipIcon.Info);
+                }
+            }
+            catch { }
+        }
+
+        private void UpdateClickThroughUI(bool enabled)
+        {
+            if (MenuClickThrough != null)
+            {
+                MenuClickThrough.IsChecked = enabled;
+            }
+            if (_trayClickThroughItem != null)
+            {
+                _trayClickThroughItem.Checked = enabled;
+            }
+        }
+
+        private void UpdateGlobalHotkey()
+        {
+            try
+            {
+                var helper = new WindowInteropHelper(this);
+                if (helper.Handle == IntPtr.Zero) return;
+
+                UnregisterHotKey(helper.Handle, HOTKEY_TREATMENT_ID);
+
+                uint mods, vk;
+                if (ParseHotkey(_config.TreatmentHotkey, out mods, out vk))
+                {
+                    RegisterHotKey(helper.Handle, HOTKEY_TREATMENT_ID, mods, vk);
+                }
+            }
+            catch { }
+        }
+
+        private bool ParseHotkey(string hotkeyStr, out uint modifiers, out uint vk)
+        {
+            modifiers = 0;
+            vk = 0;
+            if (string.IsNullOrWhiteSpace(hotkeyStr)) return false;
+
+            string[] parts = hotkeyStr.Split('+');
+            if (parts.Length == 0) return false;
+
+            string keyPart = null;
+            for (int i = 0; i < parts.Length; i++)
+            {
+                string p = parts[i].Trim();
+                if (p.Equals("Ctrl", StringComparison.OrdinalIgnoreCase) || p.Equals("Control", StringComparison.OrdinalIgnoreCase))
+                    modifiers |= MOD_CONTROL;
+                else if (p.Equals("Alt", StringComparison.OrdinalIgnoreCase))
+                    modifiers |= MOD_ALT;
+                else if (p.Equals("Shift", StringComparison.OrdinalIgnoreCase))
+                    modifiers |= MOD_SHIFT;
+                else if (p.Equals("Win", StringComparison.OrdinalIgnoreCase) || p.Equals("Windows", StringComparison.OrdinalIgnoreCase))
+                    modifiers |= MOD_WIN;
+                else
+                    keyPart = p;
+            }
+
+            if (string.IsNullOrEmpty(keyPart)) return false;
+
+            try
+            {
+                Key wpfKey = (Key)Enum.Parse(typeof(Key), keyPart, true);
+                vk = (uint)KeyInterop.VirtualKeyFromKey(wpfKey);
+                modifiers |= MOD_NOREPEAT;
+                return vk > 0;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private void SnapToScreenEdges()
@@ -478,6 +632,7 @@ namespace XDripWidget
                 Opacity = Math.Max(0.3, Math.Min(1.0, (100 - _config.Transparency) / 100.0));
                 int interval = Math.Max(1, _config.RefreshIntervalMinutes);
                 _timer.Interval = TimeSpan.FromMinutes(interval);
+                UpdateGlobalHotkey();
                 FetchDataAsync();
             }
         }
@@ -527,6 +682,16 @@ namespace XDripWidget
                 }
                 _isConfirmedQuit = true;
             }
+
+            try
+            {
+                var helper = new WindowInteropHelper(this);
+                if (helper.Handle != IntPtr.Zero)
+                {
+                    UnregisterHotKey(helper.Handle, HOTKEY_TREATMENT_ID);
+                }
+            }
+            catch { }
 
             if (_notifyIcon != null)
             {
