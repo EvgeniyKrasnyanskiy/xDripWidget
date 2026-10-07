@@ -65,7 +65,8 @@
                                 <Setter Property="Foreground" Value="#38BDF8"/>
                             </Trigger>
                             <Trigger Property="IsHighlighted" Value="True">
-                                <Setter TargetName="Border" Property="Background" Value="#0284C7"/>
+                                <Setter TargetName="Border" Property="Background" Value="#334155"/>
+                                <Setter TargetName="Border" Property="BorderBrush" Value="#475569"/>
                                 <Setter Property="Foreground" Value="#FFFFFF"/>
                             </Trigger>
                             <MultiTrigger>

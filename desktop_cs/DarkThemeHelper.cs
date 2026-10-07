@@ -1,5 +1,6 @@
 using System;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Forms;
@@ -73,19 +74,19 @@ namespace XDripWidget
         }
         public override Color MenuItemBorder
         {
-            get { return Color.Transparent; }
+            get { return Color.FromArgb(71, 85, 105); } // #475569
         }
         public override Color MenuItemSelected
         {
-            get { return Color.FromArgb(2, 132, 199); } // #0284C7 Action Blue
+            get { return Color.FromArgb(51, 65, 85); } // #334155 Soft Dark Slate hover
         }
         public override Color MenuItemSelectedGradientBegin
         {
-            get { return Color.FromArgb(2, 132, 199); }
+            get { return Color.FromArgb(51, 65, 85); }
         }
         public override Color MenuItemSelectedGradientEnd
         {
-            get { return Color.FromArgb(2, 132, 199); }
+            get { return Color.FromArgb(51, 65, 85); }
         }
         public override Color CheckBackground
         {
@@ -93,11 +94,11 @@ namespace XDripWidget
         }
         public override Color CheckSelectedBackground
         {
-            get { return Color.FromArgb(2, 132, 199); }
+            get { return Color.FromArgb(51, 65, 85); } // #334155
         }
         public override Color CheckPressedBackground
         {
-            get { return Color.FromArgb(2, 132, 199); }
+            get { return Color.FromArgb(51, 65, 85); } // #334155
         }
         public override Color SeparatorDark
         {
@@ -112,6 +113,64 @@ namespace XDripWidget
     public class DarkToolStripRenderer : ToolStripProfessionalRenderer
     {
         public DarkToolStripRenderer() : base(new DarkColorTable()) { }
+
+        protected override void OnRenderMenuItemBackground(ToolStripItemRenderEventArgs e)
+        {
+            if (e.Item.Selected)
+            {
+                var rect = new Rectangle(2, 1, e.Item.Width - 4, e.Item.Height - 2);
+                using (var brush = new SolidBrush(Color.FromArgb(51, 65, 85))) // #334155
+                {
+                    e.Graphics.FillRectangle(brush, rect);
+                }
+                using (var pen = new Pen(Color.FromArgb(71, 85, 105))) // #475569
+                {
+                    e.Graphics.DrawRectangle(pen, rect.X, rect.Y, rect.Width - 1, rect.Height - 1);
+                }
+            }
+            else
+            {
+                var rect = new Rectangle(0, 0, e.Item.Width, e.Item.Height);
+                using (var brush = new SolidBrush(Color.FromArgb(30, 41, 59))) // #1E293B
+                {
+                    e.Graphics.FillRectangle(brush, rect);
+                }
+            }
+        }
+
+        protected override void OnRenderItemCheck(ToolStripItemImageRenderEventArgs e)
+        {
+            var rect = e.ImageRectangle;
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            using (var pen = new Pen(Color.FromArgb(56, 189, 248), 2)) // #38BDF8 Sky Blue
+            {
+                pen.StartCap = LineCap.Round;
+                pen.EndCap = LineCap.Round;
+                e.Graphics.DrawLines(pen, new System.Drawing.Point[]
+                {
+                    new System.Drawing.Point(rect.Left + 3, rect.Top + rect.Height / 2),
+                    new System.Drawing.Point(rect.Left + rect.Width / 2 - 1, rect.Bottom - 4),
+                    new System.Drawing.Point(rect.Right - 3, rect.Top + 3)
+                });
+            }
+        }
+
+        protected override void OnRenderSeparator(ToolStripSeparatorRenderEventArgs e)
+        {
+            int y = e.Item.Height / 2;
+            using (var pen = new Pen(Color.FromArgb(51, 65, 85))) // #334155
+            {
+                e.Graphics.DrawLine(pen, 8, y, e.Item.Width - 8, y);
+            }
+        }
+
+        protected override void OnRenderToolStripBorder(ToolStripRenderEventArgs e)
+        {
+            using (var pen = new Pen(Color.FromArgb(51, 65, 85))) // #334155
+            {
+                e.Graphics.DrawRectangle(pen, 0, 0, e.ToolStrip.Width - 1, e.ToolStrip.Height - 1);
+            }
+        }
 
         protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e)
         {
