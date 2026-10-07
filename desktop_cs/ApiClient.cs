@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Net;
 using System.Net.Http;
 using System.Threading.Tasks;
 using System.Web.Script.Serialization;
@@ -26,12 +27,72 @@ namespace XDripWidget
 
     public class ApiClient
     {
-        private static readonly HttpClient _httpClient = new HttpClient
+        private static readonly HttpClient _httpClient;
+
+        static ApiClient()
         {
-            Timeout = TimeSpan.FromSeconds(8)
-        };
+            try
+            {
+                ServicePointManager.SecurityProtocol =
+                    SecurityProtocolType.Tls12 |
+                    SecurityProtocolType.Tls11 |
+                    SecurityProtocolType.Tls;
+                ServicePointManager.DefaultConnectionLimit = 20;
+            }
+            catch { }
+
+            _httpClient = new HttpClient
+            {
+                Timeout = TimeSpan.FromSeconds(8)
+            };
+        }
 
         private readonly JavaScriptSerializer _serializer = new JavaScriptSerializer();
+
+        private async Task<HttpResponseMessage> SendWithRetryAsync(HttpMethod method, string url, Func<HttpContent> contentFactory = null)
+        {
+            Exception lastEx = null;
+            for (int attempt = 0; attempt < 2; attempt++)
+            {
+                bool shouldRetry = false;
+                try
+                {
+                    var request = new HttpRequestMessage(method, url);
+                    request.Headers.ConnectionClose = true;
+                    if (contentFactory != null)
+                    {
+                        request.Content = contentFactory();
+                    }
+                    return await _httpClient.SendAsync(request).ConfigureAwait(false);
+                }
+                catch (HttpRequestException ex)
+                {
+                    lastEx = ex;
+                    if (attempt == 0) shouldRetry = true;
+                }
+                catch (TaskCanceledException)
+                {
+                    // Do not retry on genuine client timeout to avoid doubling delay
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    lastEx = ex;
+                    if (attempt == 0) shouldRetry = true;
+                }
+
+                if (shouldRetry)
+                {
+                    await Task.Delay(350).ConfigureAwait(false);
+                }
+            }
+
+            if (lastEx != null)
+            {
+                throw lastEx;
+            }
+            throw new Exception("Не удалось выполнить сетевой запрос");
+        }
 
         public async Task<FetchResult> FetchAllAsync(string baseUrl, string apiSecret)
         {
@@ -52,7 +113,7 @@ namespace XDripWidget
             try
             {
                 // 1. Fetch current data
-                using (var response = await _httpClient.GetAsync(currUrl).ConfigureAwait(false))
+                using (var response = await SendWithRetryAsync(HttpMethod.Get, currUrl).ConfigureAwait(false))
                 {
                     if (!response.IsSuccessStatusCode)
                     {
@@ -76,7 +137,7 @@ namespace XDripWidget
                 // 2. Fetch history (4 hours)
                 try
                 {
-                    using (var responseHist = await _httpClient.GetAsync(histUrl).ConfigureAwait(false))
+                    using (var responseHist = await SendWithRetryAsync(HttpMethod.Get, histUrl).ConfigureAwait(false))
                     {
                         if (responseHist.IsSuccessStatusCode)
                         {
@@ -143,10 +204,16 @@ namespace XDripWidget
             };
 
             string json = _serializer.Serialize(dict);
-            using (var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json"))
+            try
             {
-                var response = await _httpClient.PostAsync(url, content).ConfigureAwait(false);
-                return response.IsSuccessStatusCode;
+                using (var response = await SendWithRetryAsync(HttpMethod.Post, url, () => new StringContent(json, System.Text.Encoding.UTF8, "application/json")).ConfigureAwait(false))
+                {
+                    return response.IsSuccessStatusCode;
+                }
+            }
+            catch
+            {
+                return false;
             }
         }
 
@@ -158,44 +225,46 @@ namespace XDripWidget
             string tokenParam = string.IsNullOrWhiteSpace(apiSecret) ? string.Format("?count={0}", count) : string.Format("?count={0}&token={1}", count, Uri.EscapeDataString(apiSecret.Trim()));
             string url = string.Format("{0}/api/v1/treatments{1}", cleanUrl, tokenParam);
 
-            var response = await _httpClient.GetAsync(url).ConfigureAwait(false);
-            if (!response.IsSuccessStatusCode) return list;
-
-            string json = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-            var rawList = _serializer.Deserialize<ArrayList>(json);
-            if (rawList == null) return list;
-
-            foreach (var item in rawList)
+            using (var response = await SendWithRetryAsync(HttpMethod.Get, url).ConfigureAwait(false))
             {
-                var d = item as Dictionary<string, object>;
-                if (d == null) continue;
+                if (!response.IsSuccessStatusCode) return list;
 
-                var t = new TreatmentItem
-                {
-                    Id = SafeString(d, "_id", SafeString(d, "uuid", "")),
-                    EventType = SafeString(d, "eventType", "Treatment"),
-                    Carbs = SafeDouble(d, "carbs", 0),
-                    Insulin = SafeDouble(d, "insulin", 0),
-                    Glucose = SafeDouble(d, "glucose", 0),
-                    Notes = SafeString(d, "notes", "")
-                };
+                string json = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                var rawList = _serializer.Deserialize<ArrayList>(json);
+                if (rawList == null) return list;
 
-                long ms = SafeLong(d, "date", 0);
-                if (ms > 0)
+                foreach (var item in rawList)
                 {
-                    t.Date = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc).AddMilliseconds(ms).ToLocalTime();
+                    var d = item as Dictionary<string, object>;
+                    if (d == null) continue;
+
+                    var t = new TreatmentItem
+                    {
+                        Id = SafeString(d, "_id", SafeString(d, "uuid", "")),
+                        EventType = SafeString(d, "eventType", "Treatment"),
+                        Carbs = SafeDouble(d, "carbs", 0),
+                        Insulin = SafeDouble(d, "insulin", 0),
+                        Glucose = SafeDouble(d, "glucose", 0),
+                        Notes = SafeString(d, "notes", "")
+                    };
+
+                    long ms = SafeLong(d, "date", 0);
+                    if (ms > 0)
+                    {
+                        t.Date = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc).AddMilliseconds(ms).ToLocalTime();
+                    }
+                    else
+                    {
+                        string ca = SafeString(d, "created_at", "");
+                        DateTime dt;
+                        if (DateTime.TryParse(ca, out dt)) t.Date = dt.ToLocalTime();
+                        else t.Date = DateTime.Now;
+                    }
+
+                    list.Add(t);
                 }
-                else
-                {
-                    string ca = SafeString(d, "created_at", "");
-                    DateTime dt;
-                    if (DateTime.TryParse(ca, out dt)) t.Date = dt.ToLocalTime();
-                    else t.Date = DateTime.Now;
-                }
-
-                list.Add(t);
+                return list;
             }
-            return list;
         }
 
         public async Task<bool> DeleteTreatmentAsync(string baseUrl, string apiSecret, string id)
@@ -205,8 +274,17 @@ namespace XDripWidget
             string tokenParam = string.IsNullOrWhiteSpace(apiSecret) ? "" : string.Format("?token={0}", Uri.EscapeDataString(apiSecret.Trim()));
             string url = string.Format("{0}/api/v1/treatments/{1}{2}", cleanUrl, id, tokenParam);
 
-            var response = await _httpClient.DeleteAsync(url).ConfigureAwait(false);
-            return response.IsSuccessStatusCode;
+            try
+            {
+                using (var response = await SendWithRetryAsync(HttpMethod.Delete, url).ConfigureAwait(false))
+                {
+                    return response.IsSuccessStatusCode;
+                }
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private CurrentGlucoseData ParseCurrentData(Dictionary<string, object> d)
