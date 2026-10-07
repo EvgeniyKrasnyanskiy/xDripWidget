@@ -226,7 +226,7 @@ namespace XDripWidget
                 if ((now - _lastCriticalAlert) > AlertCooldown)
                 {
                     _lastCriticalAlert = now;
-                    PlaySoundAlert(System.Media.SystemSounds.Hand);
+                    PlaySoundAlert(_config.SoundLow);
                     _notifyIcon.ShowBalloonTip(10000, "⛔ Глубокая гипогликемия!", string.Format("{0:F1} ммоль/л — срочно примите быстрые углеводы!", data.Mmol), Forms.ToolTipIcon.Error);
                 }
             }
@@ -238,7 +238,7 @@ namespace XDripWidget
                 if ((now - _lastHypoAlert) > AlertCooldown)
                 {
                     _lastHypoAlert = now;
-                    PlaySoundAlert(System.Media.SystemSounds.Hand);
+                    PlaySoundAlert(_config.SoundLow);
                     _notifyIcon.ShowBalloonTip(8000, "🔴 Низкий сахар!", string.Format("{0:F1} ммоль/л — ниже нормы ({1:0.0}).", data.Mmol, _config.ThresholdLow), Forms.ToolTipIcon.Warning);
                 }
             }
@@ -248,7 +248,7 @@ namespace XDripWidget
                 isAlert = true;
                 alertColor = Constants.ColorLow;
                 _lastRapidDropAlert = now;
-                PlaySoundAlert(System.Media.SystemSounds.Exclamation);
+                PlaySoundAlert(_config.SoundDrop);
                 string arrow = Constants.GetTrendArrow(data.Direction);
                 _notifyIcon.ShowBalloonTip(8000, "📉 Резкое падение сахара!", string.Format("{0:F1} {1} ({2}) — сахар стремительно падает!", data.Mmol, arrow, data.Delta), Forms.ToolTipIcon.Warning);
             }
@@ -260,7 +260,7 @@ namespace XDripWidget
                 if ((now - _lastCriticalAlert) > AlertCooldown)
                 {
                     _lastCriticalAlert = now;
-                    PlaySoundAlert(System.Media.SystemSounds.Hand);
+                    PlaySoundAlert(_config.SoundHigh);
                     _notifyIcon.ShowBalloonTip(10000, "⛔ Критический гиперсахар!", string.Format("{0:F1} ммоль/л — проверьте кетоны и сделайте коррекцию!", data.Mmol), Forms.ToolTipIcon.Error);
                 }
             }
@@ -270,7 +270,7 @@ namespace XDripWidget
                 if ((now - _lastHyperAlert) > AlertCooldown)
                 {
                     _lastHyperAlert = now;
-                    PlaySoundAlert(System.Media.SystemSounds.Asterisk);
+                    PlaySoundAlert(_config.SoundHigh);
                     _notifyIcon.ShowBalloonTip(7000, "🟡 Высокий сахар", string.Format("{0:F1} ммоль/л — выше нормы ({1:0.0}).", data.Mmol, _config.ThresholdHigh), Forms.ToolTipIcon.Info);
                 }
             }
@@ -296,14 +296,10 @@ namespace XDripWidget
             }
         }
 
-        private void PlaySoundAlert(System.Media.SystemSound sound)
+        private void PlaySoundAlert(string soundKeyOrPath)
         {
-            if (!_config.SoundAlertsEnabled || sound == null) return;
-            try
-            {
-                sound.Play();
-            }
-            catch { }
+            if (!_config.SoundAlertsEnabled || string.IsNullOrWhiteSpace(soundKeyOrPath)) return;
+            SoundHelper.Play(soundKeyOrPath);
         }
 
         private System.Drawing.Icon CreateBloodDropIcon(System.Drawing.Color color)

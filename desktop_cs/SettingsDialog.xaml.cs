@@ -31,6 +31,117 @@ namespace XDripWidget
             TxtUrgentHigh.Text = _config.ThresholdUrgentHigh.ToString("0.0", CultureInfo.InvariantCulture);
             ChkSound.IsChecked = _config.SoundAlertsEnabled;
             ChkVisual.IsChecked = _config.VisualAlertsEnabled;
+
+            PopulateSoundComboBox(CmbSoundLow, _config.SoundLow ?? SoundHelper.KeyHand);
+            PopulateSoundComboBox(CmbSoundHigh, _config.SoundHigh ?? SoundHelper.KeyAsterisk);
+            PopulateSoundComboBox(CmbSoundDrop, _config.SoundDrop ?? SoundHelper.KeyExclamation);
+        }
+
+        private void PopulateSoundComboBox(System.Windows.Controls.ComboBox cmb, string selectedKey)
+        {
+            cmb.Items.Clear();
+            var items = new List<SoundItem>
+            {
+                new SoundItem { Key = SoundHelper.KeyHand, DisplayName = "Windows: Ошибка (Hand)" },
+                new SoundItem { Key = SoundHelper.KeyExclamation, DisplayName = "Windows: Предупреждение (Exclamation)" },
+                new SoundItem { Key = SoundHelper.KeyAsterisk, DisplayName = "Windows: Уведомление (Asterisk)" },
+                new SoundItem { Key = SoundHelper.KeyBeep, DisplayName = "Windows: Сигнал (Beep)" }
+            };
+
+            SoundItem matched = null;
+            foreach (var itm in items)
+            {
+                cmb.Items.Add(itm);
+                if (string.Equals(itm.Key, selectedKey, StringComparison.OrdinalIgnoreCase))
+                {
+                    matched = itm;
+                }
+            }
+
+            if (matched == null && !string.IsNullOrWhiteSpace(selectedKey))
+            {
+                var customItem = new SoundItem
+                {
+                    Key = selectedKey,
+                    DisplayName = SoundHelper.GetDisplayName(selectedKey)
+                };
+                cmb.Items.Add(customItem);
+                matched = customItem;
+            }
+
+            cmb.SelectedItem = matched ?? items[0];
+        }
+
+        private string GetSelectedSoundKey(System.Windows.Controls.ComboBox cmb)
+        {
+            var item = cmb.SelectedItem as SoundItem;
+            return item != null ? item.Key : SoundHelper.KeyHand;
+        }
+
+        private void BrowseAndSetSound(System.Windows.Controls.ComboBox cmb)
+        {
+            var ofd = new Microsoft.Win32.OpenFileDialog
+            {
+                Title = "Выберите аудиофайл для сигнала",
+                Filter = "Аудиофайлы (*.mp3;*.wav;*.wma;*.m4a;*.aac)|*.mp3;*.wav;*.wma;*.m4a;*.aac|Все файлы (*.*)|*.*"
+            };
+
+            if (ofd.ShowDialog() == true)
+            {
+                string filePath = ofd.FileName;
+                SoundItem matched = null;
+                foreach (SoundItem itm in cmb.Items)
+                {
+                    if (string.Equals(itm.Key, filePath, StringComparison.OrdinalIgnoreCase))
+                    {
+                        matched = itm;
+                        break;
+                    }
+                }
+
+                if (matched == null)
+                {
+                    matched = new SoundItem
+                    {
+                        Key = filePath,
+                        DisplayName = SoundHelper.GetDisplayName(filePath)
+                    };
+                    cmb.Items.Add(matched);
+                }
+
+                cmb.SelectedItem = matched;
+                SoundHelper.Play(filePath);
+            }
+        }
+
+        private void BtnBrowseSoundLow_Click(object sender, RoutedEventArgs e)
+        {
+            BrowseAndSetSound(CmbSoundLow);
+        }
+
+        private void BtnBrowseSoundHigh_Click(object sender, RoutedEventArgs e)
+        {
+            BrowseAndSetSound(CmbSoundHigh);
+        }
+
+        private void BtnBrowseSoundDrop_Click(object sender, RoutedEventArgs e)
+        {
+            BrowseAndSetSound(CmbSoundDrop);
+        }
+
+        private void BtnPlaySoundLow_Click(object sender, RoutedEventArgs e)
+        {
+            SoundHelper.Play(GetSelectedSoundKey(CmbSoundLow));
+        }
+
+        private void BtnPlaySoundHigh_Click(object sender, RoutedEventArgs e)
+        {
+            SoundHelper.Play(GetSelectedSoundKey(CmbSoundHigh));
+        }
+
+        private void BtnPlaySoundDrop_Click(object sender, RoutedEventArgs e)
+        {
+            SoundHelper.Play(GetSelectedSoundKey(CmbSoundDrop));
         }
 
         private void TxtHotkey_PreviewKeyDown(object sender, KeyEventArgs e)
@@ -83,15 +194,6 @@ namespace XDripWidget
             }
         }
 
-        private void BtnTestSound_Click(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                System.Media.SystemSounds.Exclamation.Play();
-            }
-            catch { }
-        }
-
         private void BtnSave_Click(object sender, RoutedEventArgs e)
         {
             _config.ServerUrl = TxtServerUrl.Text.Trim();
@@ -135,6 +237,10 @@ namespace XDripWidget
             _config.SoundAlertsEnabled = ChkSound.IsChecked == true;
             _config.VisualAlertsEnabled = ChkVisual.IsChecked == true;
 
+            _config.SoundLow = GetSelectedSoundKey(CmbSoundLow);
+            _config.SoundHigh = GetSelectedSoundKey(CmbSoundHigh);
+            _config.SoundDrop = GetSelectedSoundKey(CmbSoundDrop);
+
             _config.Save();
             DialogResult = true;
             Close();
@@ -145,5 +251,12 @@ namespace XDripWidget
             DialogResult = false;
             Close();
         }
+    }
+
+    public class SoundItem
+    {
+        public string Key { get; set; }
+        public string DisplayName { get; set; }
+        public override string ToString() { return DisplayName; }
     }
 }

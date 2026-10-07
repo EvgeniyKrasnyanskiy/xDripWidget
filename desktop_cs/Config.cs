@@ -33,6 +33,9 @@ namespace XDripWidget
         public double ThresholdUrgentHigh { get; set; }
         public bool SoundAlertsEnabled { get; set; }
         public bool VisualAlertsEnabled { get; set; }
+        public string SoundLow { get; set; }
+        public string SoundHigh { get; set; }
+        public string SoundDrop { get; set; }
 
         public Config()
         {
@@ -53,6 +56,9 @@ namespace XDripWidget
             ThresholdUrgentHigh = 14.0;
             SoundAlertsEnabled = true;
             VisualAlertsEnabled = true;
+            SoundLow = "SystemHand";
+            SoundHigh = "SystemAsterisk";
+            SoundDrop = "SystemExclamation";
 
             _configPath = GetConfigFilePath();
             Load();
@@ -60,19 +66,38 @@ namespace XDripWidget
 
         private string GetConfigFilePath()
         {
+            // 1. Next to executable
             string localPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "config.ini");
             if (File.Exists(localPath))
             {
                 return localPath;
             }
 
-            string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-            string dir = Path.Combine(appData, "xDripWidget");
-            if (!Directory.Exists(dir))
+            // 2. Look in parent directories (e.g. if running in bin\Release, bin\Debug or desktop_cs)
+            try
             {
-                try { Directory.CreateDirectory(dir); } catch { }
+                var dir = new DirectoryInfo(AppDomain.CurrentDomain.BaseDirectory);
+                while (dir != null && dir.Parent != null)
+                {
+                    string candidate = Path.Combine(dir.FullName, "config.ini");
+                    if (File.Exists(candidate)) return candidate;
+
+                    string distCandidate = Path.Combine(dir.FullName, "dist", "config.ini");
+                    if (File.Exists(distCandidate)) return distCandidate;
+
+                    dir = dir.Parent;
+                }
             }
-            return Path.Combine(dir, "config.ini");
+            catch { }
+
+            // 3. Fallback to AppData
+            string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            string appDataDir = Path.Combine(appData, "xDripWidget");
+            if (!Directory.Exists(appDataDir))
+            {
+                try { Directory.CreateDirectory(appDataDir); } catch { }
+            }
+            return Path.Combine(appDataDir, "config.ini");
         }
 
         public void Load()
@@ -171,6 +196,10 @@ namespace XDripWidget
             {
                 VisualAlertsEnabled = vis;
             }
+
+            SoundLow = ReadKey("Alerts", "sound_low", "SystemHand");
+            SoundHigh = ReadKey("Alerts", "sound_high", "SystemAsterisk");
+            SoundDrop = ReadKey("Alerts", "sound_drop", "SystemExclamation");
         }
 
         public void Save()
@@ -192,6 +221,9 @@ namespace XDripWidget
                 WriteKey("Alerts", "threshold_urgent_high", ThresholdUrgentHigh.ToString("0.0", CultureInfo.InvariantCulture));
                 WriteKey("Alerts", "sound_enabled", SoundAlertsEnabled ? "true" : "false");
                 WriteKey("Alerts", "visual_enabled", VisualAlertsEnabled ? "true" : "false");
+                WriteKey("Alerts", "sound_low", SoundLow ?? "SystemHand");
+                WriteKey("Alerts", "sound_high", SoundHigh ?? "SystemAsterisk");
+                WriteKey("Alerts", "sound_drop", SoundDrop ?? "SystemExclamation");
 
                 if (WindowX >= 0 && WindowY >= 0)
                 {

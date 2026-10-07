@@ -113,6 +113,7 @@
     <Compile Include="ApiClient.cs" />
     <Compile Include="GlucoseCanvas.cs" />
     <Compile Include="DarkThemeHelper.cs" />
+    <Compile Include="SoundHelper.cs" />
   </ItemGroup>
   <ItemGroup>
     <Resource Include="app.ico" />

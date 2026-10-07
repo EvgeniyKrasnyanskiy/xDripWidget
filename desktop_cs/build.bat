@@ -27,6 +27,7 @@ if not exist "..\dist" (
 taskkill /F /IM xDripWidget-CS.exe 2>nul
 timeout /t 1 /nobreak >nul
 copy /Y "bin\Release\xDripWidget-CS.exe" "..\dist\xDripWidget-CS.exe" >nul
+if not exist "bin\Release\config.ini" if exist "..\dist\config.ini" copy /Y "..\dist\config.ini" "bin\Release\config.ini" >nul
 echo.
 echo ========================================================
 echo SUCCESS! Executable built:
