@@ -114,6 +114,7 @@ namespace XDripWidget
             contextMenu.Items.Add("Показать / Скрыть", null, (s, e) => ToggleVisibility());
             contextMenu.Items.Add("Обновить сейчас", null, (s, e) => FetchDataAsync());
             contextMenu.Items.Add("Ввести терапию", null, (s, e) => Dispatcher.Invoke((Action)(() => MenuTreatments_Click(this, new RoutedEventArgs()))));
+            contextMenu.Items.Add("История / Удаление терапий", null, (s, e) => Dispatcher.Invoke((Action)(() => MenuHistory_Click(this, new RoutedEventArgs()))));
             contextMenu.Items.Add(new Forms.ToolStripSeparator());
             
             _trayCompactItem = new Forms.ToolStripMenuItem("Компактный режим («Мини-пилюля»)", null, (s, e) => Dispatcher.Invoke((Action)(() => SetCompactMode(!_config.CompactMode))));
@@ -127,6 +128,10 @@ namespace XDripWidget
             _trayAcrylicItem = new Forms.ToolStripMenuItem("Матовое стекло (Acrylic Blur)", null, (s, e) => Dispatcher.Invoke((Action)(() => SetAcrylicBlur(!_config.AcrylicBlur))));
             _trayAcrylicItem.Checked = _config.AcrylicBlur;
             contextMenu.Items.Add(_trayAcrylicItem);
+            contextMenu.Items.Add(new Forms.ToolStripSeparator());
+
+            contextMenu.Items.Add("Настройки…", null, (s, e) => Dispatcher.Invoke((Action)(() => MenuSettings_Click(this, new RoutedEventArgs()))));
+            contextMenu.Items.Add("О программе", null, (s, e) => Dispatcher.Invoke((Action)(() => MenuAbout_Click(this, new RoutedEventArgs()))));
             contextMenu.Items.Add(new Forms.ToolStripSeparator());
 
             contextMenu.Items.Add("Выход", null, (s, e) => Dispatcher.Invoke((Action)ConfirmAndQuit));

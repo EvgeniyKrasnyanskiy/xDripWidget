@@ -30,15 +30,6 @@
             <Setter Property="Padding" Value="6,4"/>
             <Setter Property="FontSize" Value="13"/>
         </Style>
-        <Style TargetType="Button">
-            <Setter Property="Background" Value="#1E293B"/>
-            <Setter Property="Foreground" Value="#F8FAFC"/>
-            <Setter Property="BorderBrush" Value="#334155"/>
-            <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="Padding" Value="14,6"/>
-            <Setter Property="FontSize" Value="13"/>
-            <Setter Property="Cursor" Value="Hand"/>
-        </Style>
     </Window.Resources>
     <Grid Margin="20,16">
         <Grid.RowDefinitions>
