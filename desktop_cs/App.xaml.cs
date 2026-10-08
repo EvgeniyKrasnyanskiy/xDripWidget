@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading;
@@ -26,13 +26,7 @@ namespace XDripWidget
         {
             DispatcherUnhandledException += (s, args) =>
             {
-                try
-                {
-                    string logPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "widget_cs.log");
-                    string logEntry = string.Format("[{0:yyyy-MM-dd HH:mm:ss}] Unhandled: {1}\n", DateTime.Now, args.Exception);
-                    File.AppendAllText(logPath, logEntry);
-                }
-                catch { }
+                Logger.Error("Необработанное исключение (Unhandled Dispatcher Exception)", args.Exception);
                 args.Handled = true;
             };
 
@@ -52,12 +46,14 @@ namespace XDripWidget
                 return;
             }
 
+            Logger.Info("=================== xDripWidget-CS запущен ===================");
             var mainWindow = new MainWindow();
             mainWindow.Show();
         }
 
         private void Application_Exit(object sender, ExitEventArgs e)
         {
+            Logger.Info("=================== xDripWidget-CS завершил работу ===================");
             if (_singleInstanceMutex != null)
             {
                 try

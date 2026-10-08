@@ -1,4 +1,5 @@
-using System;
+﻿using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.IO;
@@ -34,6 +35,10 @@ namespace XDripWidget
         private DateTime _lastCriticalAlert = DateTime.MinValue;
         private DateTime _lastRapidDropAlert = DateTime.MinValue;
         private static readonly TimeSpan AlertCooldown = TimeSpan.FromMinutes(20);
+
+        private DateTime _lastSuccessfulFetch = DateTime.MinValue;
+        private CurrentGlucoseData _lastKnownData = null;
+        private List<HistoryPoint> _lastKnownHistory = new List<HistoryPoint>();
 
         public MainWindow()
         {
@@ -169,20 +174,45 @@ namespace XDripWidget
                 var result = await _apiClient.FetchAllAsync(_config.ServerUrl, _config.ApiSecret);
                 if (result.IsSuccess)
                 {
+                    _lastSuccessfulFetch = DateTime.Now;
+                    _lastKnownData = result.CurrentData;
+                    _lastKnownHistory = result.History ?? new List<HistoryPoint>();
+
                     CanvasElement.UpdateData(result.CurrentData, result.History);
                     UpdateTray(result.CurrentData);
                     CheckAlerts(result.CurrentData);
                 }
                 else
                 {
-                    CanvasElement.SetError(result.ErrorMessage);
-                    _notifyIcon.Text = string.Format("xDrip Widget: {0}", result.ErrorMessage);
-                    if (_notifyIcon.Text.Length >= 64) _notifyIcon.Text = _notifyIcon.Text.Substring(0, 63);
-                    _notifyIcon.Icon = CreateBloodDropIcon(System.Drawing.Color.FromArgb(148, 163, 184));
+                    // Check if we have recent valid data (less than 5 minutes old)
+                    double minutesSinceSuccess = _lastSuccessfulFetch != DateTime.MinValue 
+                        ? (DateTime.Now - _lastSuccessfulFetch).TotalMinutes 
+                        : double.MaxValue;
+
+                    bool hasRecentData = _lastKnownData != null && minutesSinceSuccess < 5.0;
+
+                    if (hasRecentData)
+                    {
+                        Logger.Warn(string.Format("Сбой опроса ({0}), но данные получены недавно ({1:F1} мин назад < 5 мин). Сохраняем показания на экране.", result.ErrorMessage, minutesSinceSuccess));
+
+                        // Increment displayed time ago
+                        _lastKnownData.MinutesAgo = (int)Math.Max(_lastKnownData.MinutesAgo, Math.Round(minutesSinceSuccess));
+                        CanvasElement.UpdateData(_lastKnownData, _lastKnownHistory);
+                        UpdateTray(_lastKnownData);
+                    }
+                    else
+                    {
+                        Logger.Warn(string.Format("Сбой опроса ({0}) и данных нет дольше 5 мин ({1:F1} мин). Отображаем ошибку на экране.", result.ErrorMessage, minutesSinceSuccess));
+                        CanvasElement.SetError(result.ErrorMessage);
+                        _notifyIcon.Text = string.Format("xDrip Widget: {0}", result.ErrorMessage);
+                        if (_notifyIcon.Text.Length >= 64) _notifyIcon.Text = _notifyIcon.Text.Substring(0, 63);
+                        _notifyIcon.Icon = CreateBloodDropIcon(System.Drawing.Color.FromArgb(148, 163, 184));
+                    }
                 }
             }
             catch (Exception ex)
             {
+                Logger.Error("Необработанная ошибка в FetchDataAsync", ex);
                 CanvasElement.SetError(ex.Message);
             }
             finally
@@ -933,6 +963,7 @@ namespace XDripWidget
             var dlg = new TreatmentDialog(_apiClient, _config.ServerUrl, _config.ApiSecret);
             dlg.Owner = this;
             PositionDialogNearWidget(dlg);
+            dlg.Topmost = true;
             if (dlg.ShowDialog() == true)
             {
                 FetchDataAsync();

@@ -114,6 +114,7 @@
     <Compile Include="GlucoseCanvas.cs" />
     <Compile Include="DarkThemeHelper.cs" />
     <Compile Include="SoundHelper.cs" />
+    <Compile Include="Logger.cs" />
   </ItemGroup>
   <ItemGroup>
     <Resource Include="app.ico" />

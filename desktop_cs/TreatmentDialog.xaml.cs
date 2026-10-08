@@ -1,12 +1,17 @@
-using System;
+﻿using System;
 using System.Globalization;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Interop;
 
 namespace XDripWidget
 {
     public partial class TreatmentDialog : Window
     {
+        [DllImport("user32.dll")]
+        private static extern bool SetForegroundWindow(IntPtr hWnd);
+
         private readonly ApiClient _apiClient;
         private readonly string _baseUrl;
         private readonly string _apiSecret;
@@ -23,7 +28,21 @@ namespace XDripWidget
 
             Loaded += (s, e) =>
             {
+                try
+                {
+                    var helper = new WindowInteropHelper(this);
+                    if (helper.Handle != IntPtr.Zero)
+                    {
+                        SetForegroundWindow(helper.Handle);
+                    }
+                }
+                catch { }
+
+                Activate();
+                Focus();
                 TxtInsulin.Focus();
+                Keyboard.Focus(TxtInsulin);
+                TxtInsulin.SelectAll();
             };
 
             KeyDown += (s, e) =>

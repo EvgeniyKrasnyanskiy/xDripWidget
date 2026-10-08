@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Net;
@@ -43,7 +43,7 @@ namespace XDripWidget
 
             _httpClient = new HttpClient
             {
-                Timeout = TimeSpan.FromSeconds(8)
+                Timeout = TimeSpan.FromSeconds(15)
             };
         }
 
@@ -68,22 +68,46 @@ namespace XDripWidget
                 catch (HttpRequestException ex)
                 {
                     lastEx = ex;
-                    if (attempt == 0) shouldRetry = true;
+                    if (attempt == 0)
+                    {
+                        Logger.Warn(string.Format("HttpRequestException on {0}: {1}. Повтор через 500 мс...", url, ex.Message));
+                        shouldRetry = true;
+                    }
+                    else
+                    {
+                        Logger.Error(string.Format("HttpRequestException on {0} после повтора", url), ex);
+                    }
                 }
-                catch (TaskCanceledException)
+                catch (TaskCanceledException ex)
                 {
-                    // Do not retry on genuine client timeout to avoid doubling delay
-                    throw;
+                    lastEx = ex;
+                    if (attempt == 0)
+                    {
+                        Logger.Warn(string.Format("Таймаут запроса к {0}. Повторная попытка...", url));
+                        shouldRetry = true;
+                    }
+                    else
+                    {
+                        Logger.Error(string.Format("Таймаут запроса к {0} после повтора", url), ex);
+                    }
                 }
                 catch (Exception ex)
                 {
                     lastEx = ex;
-                    if (attempt == 0) shouldRetry = true;
+                    if (attempt == 0)
+                    {
+                        Logger.Warn(string.Format("Ошибка запроса {0}: {1}. Повтор...", url, ex.Message));
+                        shouldRetry = true;
+                    }
+                    else
+                    {
+                        Logger.Error(string.Format("Ошибка запроса {0} после повтора", url), ex);
+                    }
                 }
 
                 if (shouldRetry)
                 {
-                    await Task.Delay(350).ConfigureAwait(false);
+                    await Task.Delay(500).ConfigureAwait(false);
                 }
             }
 
@@ -110,6 +134,7 @@ namespace XDripWidget
             string currUrl = string.Format("{0}/api/v1/current{1}", cleanUrl, tokenParam);
             string histUrl = string.Format("{0}/api/v1/history{1}", cleanUrl, tokenParamHist);
 
+            var sw = System.Diagnostics.Stopwatch.StartNew();
             try
             {
                 // 1. Fetch current data
@@ -118,6 +143,7 @@ namespace XDripWidget
                     if (!response.IsSuccessStatusCode)
                     {
                         result.ErrorMessage = string.Format("Ошибка сервера (HTTP {0})", (int)response.StatusCode);
+                        Logger.Warn(string.Format("Запрос {0} вернул статус {1} за {2} мс", currUrl, (int)response.StatusCode, sw.ElapsedMilliseconds));
                         return result;
                     }
 
@@ -130,6 +156,7 @@ namespace XDripWidget
                     else
                     {
                         result.ErrorMessage = "Неверный формат ответа";
+                        Logger.Warn(string.Format("Неверный формат ответа от {0}", currUrl));
                         return result;
                     }
                 }
@@ -162,22 +189,35 @@ namespace XDripWidget
                         }
                     }
                 }
-                catch
+                catch (Exception exHist)
                 {
-                    // History failure is non-fatal
+                    Logger.Warn(string.Format("Загрузка истории не удалась (некритично): {0}", exHist.Message));
+                }
+
+                sw.Stop();
+                if (result.CurrentData != null)
+                {
+                    Logger.Info(string.Format("Опрос успешен за {0} мс: {1:0.0} ммоль/л, тренд={2}, батарея={3}%, точек истории={4}",
+                        sw.ElapsedMilliseconds, result.CurrentData.Mmol, result.CurrentData.Direction, result.CurrentData.Battery, result.History.Count));
                 }
             }
-            catch (TaskCanceledException)
+            catch (TaskCanceledException ex)
             {
+                sw.Stop();
                 result.ErrorMessage = "Таймаут соединения";
+                Logger.Warn(string.Format("Таймаут соединения при опросе {0} за {1} мс: {2}", currUrl, sw.ElapsedMilliseconds, ex.Message));
             }
             catch (HttpRequestException ex)
             {
+                sw.Stop();
                 result.ErrorMessage = FormatNetworkError(ex);
+                Logger.Warn(string.Format("Сетевая ошибка при опросе {0} за {1} мс: {2}", currUrl, sw.ElapsedMilliseconds, ex.Message));
             }
             catch (Exception ex)
             {
+                sw.Stop();
                 result.ErrorMessage = string.Format("Ошибка: {0}", ex.Message);
+                Logger.Error(string.Format("Исключение при опросе {0} за {1} мс", currUrl, sw.ElapsedMilliseconds), ex);
             }
 
             return result;
