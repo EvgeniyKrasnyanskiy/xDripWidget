@@ -36,11 +36,13 @@ namespace XDripWidget
         public string SoundLow { get; set; }
         public string SoundHigh { get; set; }
         public string SoundDrop { get; set; }
+        public string LogLevel { get; set; }
 
         public Config()
         {
             ServerUrl = "http://localhost:8080";
             ApiSecret = "";
+            LogLevel = "INFO";
             Transparency = 10;
             RefreshIntervalMinutes = 1;
             WindowX = -1;
@@ -200,6 +202,9 @@ namespace XDripWidget
             SoundLow = ReadKey("Alerts", "sound_low", "SystemHand");
             SoundHigh = ReadKey("Alerts", "sound_high", "SystemAsterisk");
             SoundDrop = ReadKey("Alerts", "sound_drop", "SystemExclamation");
+
+            LogLevel = ReadKey("Logging", "log_level", "INFO");
+            Logger.SetLevel(LogLevel);
         }
 
         public void Save()
@@ -224,6 +229,8 @@ namespace XDripWidget
                 WriteKey("Alerts", "sound_low", SoundLow ?? "SystemHand");
                 WriteKey("Alerts", "sound_high", SoundHigh ?? "SystemAsterisk");
                 WriteKey("Alerts", "sound_drop", SoundDrop ?? "SystemExclamation");
+
+                WriteKey("Logging", "log_level", LogLevel ?? "INFO");
 
                 if (WindowX >= 0 && WindowY >= 0)
                 {
