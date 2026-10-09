@@ -331,7 +331,7 @@ namespace XDripWidget
             dc.DrawRoundedRectangle(pillBgBrush, pillBorderPen, new Rect(0.5, 0.5, w - 1.0, h - 1.0), radius, radius);
 
             Color pillStatusColor = _data != null ? Constants.GetGlucoseColor(_data.Mmol, _data.IsStale) : Constants.ColorGray;
-            dc.DrawEllipse(new SolidColorBrush(pillStatusColor), null, new Point(12, h / 2.0), 3.5, 3.5);
+            dc.DrawEllipse(new SolidColorBrush(pillStatusColor), null, new Point(11.5, h / 2.0), 3.5, 3.5);
 
             if (_isLoading && _data == null && string.IsNullOrEmpty(_errorMessage))
             {
@@ -350,44 +350,89 @@ namespace XDripWidget
             var glucoseFt = CreateFormattedText(glucoseText, _typefaceBig, 15.5, pillStatusColor);
 
             string deltaText = string.Format("({0})", _data.Delta);
-            var deltaFt = CreateFormattedText(deltaText, _typefaceMed, 11, Constants.ColorSub);
+            var deltaFt = CreateFormattedText(deltaText, _typefaceMed, 10.5, Constants.ColorSub);
 
-            double textStartX = 20;
+            double textStartX = 18.5;
             dc.DrawText(glucoseFt, new Point(textStartX, (h - glucoseFt.Height) / 2.0));
-            dc.DrawText(deltaFt, new Point(textStartX + glucoseFt.Width + 4, (h - deltaFt.Height) / 2.0 + 1));
+            dc.DrawText(deltaFt, new Point(textStartX + glucoseFt.Width + 3.0, (h - deltaFt.Height) / 2.0 + 1));
+            double deltaEndX = textStartX + glucoseFt.Width + 3.0 + deltaFt.Width;
 
-            // Mini vertical battery bar on the right
+            // Battery display on the right
             if (_data.Battery >= 0)
             {
                 int pct = _data.Battery;
                 Color bColor = (pct <= 5) ? Constants.ColorVeryLow : Constants.GetBatteryColor(pct, _data.IsStale);
-
-                const double bWidth = 6.0;
-                const double bHeight = 12.0;
-                const double capW = 3.0;
-                const double capH = 1.5;
-
-                double bStartX = w - 12.0 - bWidth;
-                double bStartY = (h - bHeight) / 2.0;
-
                 var borderPen = new Pen(new SolidColorBrush(Constants.ColorBorder), 1.0);
 
-                // Battery cap (positive terminal on top)
-                double capX = bStartX + (bWidth - capW) / 2.0;
-                double capY = bStartY - capH;
-                dc.DrawRoundedRectangle(new SolidColorBrush(Constants.ColorBorder), null, new Rect(capX, capY, capW, capH), 0.5, 0.5);
+                string bText = string.Format("{0}%", pct);
+                var pctFt = CreateFormattedText(bText, _typefaceSml, 9.0, bColor);
 
-                // Battery body border
-                dc.DrawRoundedRectangle(null, borderPen, new Rect(bStartX, bStartY, bWidth, bHeight), 1.5, 1.5);
+                const double iconWidth = 9.5;
+                const double iconHeight = 6.0;
+                const double capW = 1.5;
+                const double capH = 3.0;
+                const double textGap = 2.0;
 
-                // Battery fill (bottom-up)
-                if (pct > 0)
+                double totalBW = iconWidth + capW + textGap + pctFt.Width;
+                double rightEdge = w - 8.0;
+                double bStartX = rightEdge - totalBW;
+                double spaceToDelta = bStartX - deltaEndX;
+
+                if (spaceToDelta >= 3.5)
                 {
-                    double innerMaxH = bHeight - 2.0;
-                    double innerW = bWidth - 2.0;
-                    double fillH = Math.Max(1.0, innerMaxH * Math.Min(pct, 100) / 100.0);
-                    double fillY = bStartY + 1.0 + (innerMaxH - fillH);
-                    dc.DrawRoundedRectangle(new SolidColorBrush(bColor), null, new Rect(bStartX + 1.0, fillY, innerW, fillH), 0.5, 0.5);
+                    // Draw horizontal battery icon on the left, percentage on the right
+                    double bStartY = (h - iconHeight) / 2.0;
+
+                    // Battery body
+                    dc.DrawRoundedRectangle(null, borderPen, new Rect(bStartX, bStartY, iconWidth, iconHeight), 1.0, 1.0);
+
+                    // Battery fill
+                    if (pct > 0)
+                    {
+                        double innerMaxW = iconWidth - 2.0;
+                        double innerH = iconHeight - 2.0;
+                        double fillW = Math.Max(1.0, innerMaxW * Math.Min(pct, 100) / 100.0);
+                        dc.DrawRoundedRectangle(new SolidColorBrush(bColor), null, new Rect(bStartX + 1.0, bStartY + 1.0, fillW, innerH), 0.5, 0.5);
+                    }
+
+                    // Battery cap (on the right side of the icon)
+                    double capX = bStartX + iconWidth;
+                    double capY = bStartY + (iconHeight - capH) / 2.0;
+                    dc.DrawRoundedRectangle(new SolidColorBrush(Constants.ColorBorder), null, new Rect(capX, capY, capW, capH), 0.5, 0.5);
+
+                    // Percentage text
+                    double textX = capX + capW + textGap;
+                    dc.DrawText(pctFt, new Point(textX, (h - pctFt.Height) / 2.0));
+                }
+                else
+                {
+                    // Space constrained: draw horizontal battery icon centered in remaining space
+                    const double soloWidth = 11.0;
+                    const double soloHeight = 6.5;
+                    const double soloCapW = 1.5;
+                    const double soloCapH = 3.5;
+                    double totalSoloW = soloWidth + soloCapW;
+
+                    double availCenter = (deltaEndX + rightEdge) / 2.0;
+                    double soloStartX = Math.Max(deltaEndX + 2.0, availCenter - (totalSoloW / 2.0));
+                    double soloStartY = (h - soloHeight) / 2.0;
+
+                    // Battery body
+                    dc.DrawRoundedRectangle(null, borderPen, new Rect(soloStartX, soloStartY, soloWidth, soloHeight), 1.0, 1.0);
+
+                    // Battery fill
+                    if (pct > 0)
+                    {
+                        double innerMaxW = soloWidth - 2.0;
+                        double innerH = soloHeight - 2.0;
+                        double fillW = Math.Max(1.0, innerMaxW * Math.Min(pct, 100) / 100.0);
+                        dc.DrawRoundedRectangle(new SolidColorBrush(bColor), null, new Rect(soloStartX + 1.0, soloStartY + 1.0, fillW, innerH), 0.5, 0.5);
+                    }
+
+                    // Battery cap
+                    double capX = soloStartX + soloWidth;
+                    double capY = soloStartY + (soloHeight - soloCapH) / 2.0;
+                    dc.DrawRoundedRectangle(new SolidColorBrush(Constants.ColorBorder), null, new Rect(capX, capY, soloCapW, soloCapH), 0.5, 0.5);
                 }
             }
         }
