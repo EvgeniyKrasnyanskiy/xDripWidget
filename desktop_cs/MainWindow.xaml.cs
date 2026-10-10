@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -126,7 +126,7 @@ namespace XDripWidget
             _trayCompactItem.Checked = _config.CompactMode;
             contextMenu.Items.Add(_trayCompactItem);
 
-            _trayClickThroughItem = new Forms.ToolStripMenuItem("Режим «Призрак» (сквозной клик)", null, (s, e) => ToggleClickThrough());
+            _trayClickThroughItem = new Forms.ToolStripMenuItem("Режим «Призрак» (сквозной клик)", null, (s, e) => Dispatcher.Invoke((Action)ToggleClickThrough));
             _trayClickThroughItem.Checked = _config.ClickThrough;
             contextMenu.Items.Add(_trayClickThroughItem);
 
@@ -410,7 +410,8 @@ namespace XDripWidget
 
         private const int GWL_EXSTYLE = -20;
         private const int WS_EX_TRANSPARENT = 0x00000020;
-        private const int SnapThresholdPx = 20;
+        private const int SnapThresholdDefault = 12;
+        private const int SnapThresholdCompact = 8;
 
         [DllImport("user32.dll")]
         private static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
@@ -472,25 +473,28 @@ namespace XDripWidget
                 int w = rect.Right - rect.Left;
                 int h = rect.Bottom - rect.Top;
 
+                int snapX = _config.CompactMode ? SnapThresholdCompact : SnapThresholdDefault;
+                int snapY = _config.CompactMode ? SnapThresholdCompact : SnapThresholdDefault;
+
                 // Horizontal snap
-                if (Math.Abs(rect.Left - wa.Left) <= SnapThresholdPx)
+                if (Math.Abs(rect.Left - wa.Left) <= snapX)
                 {
                     rect.Left = wa.Left;
                     rect.Right = wa.Left + w;
                 }
-                else if (Math.Abs(rect.Right - wa.Right) <= SnapThresholdPx)
+                else if (Math.Abs(rect.Right - wa.Right) <= snapX)
                 {
                     rect.Right = wa.Right;
                     rect.Left = wa.Right - w;
                 }
 
                 // Vertical snap
-                if (Math.Abs(rect.Top - wa.Top) <= SnapThresholdPx)
+                if (Math.Abs(rect.Top - wa.Top) <= snapY)
                 {
                     rect.Top = wa.Top;
                     rect.Bottom = wa.Top + h;
                 }
-                else if (Math.Abs(rect.Bottom - wa.Bottom) <= SnapThresholdPx)
+                else if (Math.Abs(rect.Bottom - wa.Bottom) <= snapY)
                 {
                     rect.Bottom = wa.Bottom;
                     rect.Top = wa.Bottom - h;
@@ -541,6 +545,7 @@ namespace XDripWidget
                 }
                 _config.SaveClickThrough(enable);
                 UpdateClickThroughUI(enable);
+                Logger.Info(string.Format("Режим «Призрак» (сквозной клик) {0}", enable ? "включен" : "отключен"));
 
                 if (enable && _notifyIcon != null)
                 {
@@ -821,24 +826,25 @@ namespace XDripWidget
                         double workRight = screen.WorkingArea.Right / dpiX;
                         double workBottom = screen.WorkingArea.Bottom / dpiY;
 
-                        const double snapDips = 20.0;
+                        double snapDipsX = _config.CompactMode ? SnapThresholdCompact : SnapThresholdDefault;
+                        double snapDipsY = _config.CompactMode ? SnapThresholdCompact : SnapThresholdDefault;
                         double w = ActualWidth > 0 ? ActualWidth : Width;
                         double h = ActualHeight > 0 ? ActualHeight : Height;
 
-                        if (Math.Abs(Left - workLeft) <= snapDips)
+                        if (Math.Abs(Left - workLeft) <= snapDipsX)
                         {
                             Left = workLeft;
                         }
-                        else if (Math.Abs((Left + w) - workRight) <= snapDips)
+                        else if (Math.Abs((Left + w) - workRight) <= snapDipsX)
                         {
                             Left = workRight - w;
                         }
 
-                        if (Math.Abs(Top - workTop) <= snapDips)
+                        if (Math.Abs(Top - workTop) <= snapDipsY)
                         {
                             Top = workTop;
                         }
-                        else if (Math.Abs((Top + h) - workBottom) <= snapDips)
+                        else if (Math.Abs((Top + h) - workBottom) <= snapDipsY)
                         {
                             Top = workBottom - h;
                         }
