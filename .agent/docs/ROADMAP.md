@@ -19,82 +19,99 @@
 
 ## 2. Инфраструктура и серверная миграция
 
-- [ ] **Миграция бэкенда на сервер в РФ с поддержкой HTTPS и доменного имени**:
-  - **Цель**: Полное устранение сбоев выгрузки данных через мобильных операторов РФ без необходимости постоянного использования VPN на смартфоне.
+- [ ] **Миграция бэкенда на существующий сервер в РФ с сайтом (HTTPS + поддомен)**:
+  - **Контекст**: На целевом сервере уже работает веб-сайт и задействованы порты 80/443. Миграция строится по принципу **100% изоляции**, чтобы гарантированно не затронуть работу существующего сайта и его сервисов.
+  - **Цель**: Стабильная выгрузка сахара через любого мобильного оператора РФ без VPN, по защищенному протоколу HTTPS.
 
-  ### Пошаговый алгоритм миграции:
-  1. **Аренда VPS в РФ**:
-     - Рекомендуемые провайдеры: Timeweb Cloud, Selectel, Beget, RuVDS, Yandex Cloud.
-     - Конфигурация: 1 vCPU, 512 МБ – 1 ГБ RAM, ОС Ubuntu 22.04 / 24.04 LTS (микро-бэкенд потребляет < 20 МБ RAM).
-  2. **Привязка домена (DNS)**:
-     - Выбрать домен или поддомен (например, `glycemia.mydomain.ru`).
-     - Создать **A-запись** в панели DNS, указав IPv4-адрес нового российского сервера.
-  3. **Развёртывание бэкенда**:
-     - Установить системные пакеты:
+  ### Пошаговый алгоритм миграции (на работающий сервер):
+
+  1. **Создание поддомена в DNS**:
+     - Чтобы не пересекаться с основным сайтом, выделить отдельный поддомен (например, `cgm.mydomain.ru` или `glycemia.mydomain.ru`).
+     - В DNS-панели домена добавить **A-запись** поддомена, указывающую на IP-адрес этого сервера.
+
+  2. **Выбор свободного внутреннего порта**:
+     - Проверить, какие порты уже заняты существующими приложениями:
+       ```bash
+       sudo ss -tulpn | grep LISTEN
+       ```
+     - Выбрать свободный внутренний порт (например, `8085` или `8090`). Бэкенд будет слушать **только локальный интерфейс `127.0.0.1`** и не будет торчать наружу в интернет напрямую.
+
+  3. **Изолированное развёртывание бэкенда**:
+     - Убедиться в наличии Python 3 и venv:
        ```bash
        sudo apt update && sudo apt install -y python3-venv python3-pip git sqlite3
        ```
-     - Клонировать проект:
+     - Создать изолированную папку (пакеты не смешаются с основным сайтом):
        ```bash
        sudo mkdir -p /opt/glycemia-backend/data
        sudo chown -R $USER:$USER /opt/glycemia-backend
        git clone https://github.com/EvgeniyKrasnyanskiy/xDripWidget.git /opt/glycemia-backend
        ```
-     - Создать virtualenv и установить зависимости:
+     - Создать виртуальное окружение:
        ```bash
        cd /opt/glycemia-backend
        python3 -m venv .venv
        .venv/bin/pip install -r requirements.txt
        ```
-     - **Перенос существующей базы данных** со старого сервера (сохранение всей истории сахаров и терапий):
+     - **Перенос существующей базы данных** со старого VPS (сохранение всей истории сахаров и терапий):
        ```bash
-       # Выполнить со старого сервера или скопировать через scp:
-       scp /opt/glycemia-backend/data/glycemia.db user@НОВЫЙ_IP:/opt/glycemia-backend/data/glycemia.db
+       scp /opt/glycemia-backend/data/glycemia.db user@НОВЫЙ_СЕРВЕР:/opt/glycemia-backend/data/glycemia.db
        ```
-     - Настроить секрет в systemd override (`/etc/systemd/system/glycemia_backend.service.d/override.conf`):
+     - Настроить systemd сервис с выбранным свободным портом (например, 8085) и секретом (`/etc/systemd/system/glycemia_backend.service.d/override.conf`):
        ```ini
        [Service]
        Environment="API_SECRET=MyGlucoseSecret2026"
+       # При необходимости сменить порт (по умолчанию в unit-файле 8080):
+       ExecStart=
+       ExecStart=/opt/glycemia-backend/.venv/bin/uvicorn main:app --host 127.0.0.1 --port 8085
        ```
-     - Установить и активировать сервис:
+     - Запустить и включить службу:
        ```bash
-       sudo cp /opt/glycemia-backend/glycemia_backend.service /etc/systemd/system/
        sudo systemctl daemon-reload
        sudo systemctl enable --now glycemia_backend
        ```
-  4. **Настройка Reverse Proxy (Nginx) и бесплатного SSL (Let's Encrypt)**:
-     - Установить Nginx и Certbot:
+     - Проверить локальный ответ бэкенда:
        ```bash
-       sudo apt install -y nginx certbot python3-certbot-nginx
+       curl http://127.0.0.1:8085/health
+       # Ответ: {"status":"ok","ts":...}
        ```
-     - Создать конфиг виртуального хоста `/etc/nginx/sites-available/glycemia`:
-       ```nginx
-       server {
-           listen 80;
-           server_name glycemia.mydomain.ru;
 
-           location / {
-               proxy_pass http://127.0.0.1:8080;
-               proxy_set_header Host $host;
-               proxy_set_header X-Real-IP $remote_addr;
-               proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-               proxy_set_header X-Forwarded-Proto $scheme;
-           }
-       }
-       ```
-     - Активировать сайт и перезагрузить Nginx:
+  4. **Настройка проксирования и SSL (два варианта в зависимости от сервера)**:
+
+     * **Вариант А: Если на сервере установлен чистый Nginx**:
+       - Конфиги основного сайта **не трогаются**. Создаётся отдельный файл виртуального хоста `/etc/nginx/sites-available/cgm.mydomain.ru`:
+         ```nginx
+         server {
+             listen 80;
+             server_name cgm.mydomain.ru;
+
+             location / {
+                 proxy_pass http://127.0.0.1:8085;
+                 proxy_set_header Host $host;
+                 proxy_set_header X-Real-IP $remote_addr;
+                 proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                 proxy_set_header X-Forwarded-Proto $scheme;
+             }
+         }
+         ```
+       - Активировать поддомен и проверить конфигурацию:
+         ```bash
+         sudo ln -s /etc/nginx/sites-available/cgm.mydomain.ru /etc/nginx/sites-enabled/
+         sudo nginx -t && sudo systemctl reload nginx
+         ```
+       - Выпустить сертификат Certbot строго для нового поддомена (сертификаты существующего сайта не затрагиваются):
+         ```bash
+         sudo certbot --nginx -d cgm.mydomain.ru
+         ```
+
+     * **Вариант Б: Если сервер управляется панелью (FastPanel, ISPmanager, aaPanel, CyberPanel)**:
+       1. В веб-панели нажать **«Добавить сайт / поддомен»** → указать `cgm.mydomain.ru`.
+       2. В настройках поддомена включить **Reverse Proxy (Проксирование)** на адрес `http://127.0.0.1:8085`.
+       3. Во вкладке **SSL** нажать **«Выпустить Let's Encrypt»** с галочкой принудительного HTTPS.
+
+     - Проверить доступность по HTTPS из внешнего интернета:
        ```bash
-       sudo ln -s /etc/nginx/sites-available/glycemia /etc/nginx/sites-enabled/
-       sudo nginx -t && sudo systemctl reload nginx
-       ```
-     - Выпустить бесплатный SSL-сертификат:
-       ```bash
-       sudo certbot --nginx -d glycemia.mydomain.ru
-       ```
-       *(Certbot автоматически настроит HTTPS на порту 443 и автоматическое перенаправление с HTTP на HTTPS).*
-     - Проверить работоспособность:
-       ```bash
-       curl https://glycemia.mydomain.ru/health
+       curl https://cgm.mydomain.ru/health
        # Ответ: {"status":"ok","ts":...}
        ```
 
