@@ -14,7 +14,7 @@ if not exist %MSBUILD% (
 cd /d "%~dp0"
 
 taskkill /F /IM xDripWidget-CS.exe 2>nul
-timeout /t 1 /nobreak >nul
+ping 127.0.0.1 -n 2 >nul
 
 %MSBUILD% xDripWidget.csproj /p:Configuration=Release /t:Rebuild /v:m /nologo
 if %ERRORLEVEL% NEQ 0 (

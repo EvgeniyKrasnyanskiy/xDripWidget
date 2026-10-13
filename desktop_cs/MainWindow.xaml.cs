@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.IO;
+using System.Net.NetworkInformation;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
@@ -18,6 +19,9 @@ namespace XDripWidget
         private readonly Config _config = new Config();
         private readonly ApiClient _apiClient = new ApiClient();
         private readonly DispatcherTimer _timer = new DispatcherTimer();
+        private readonly DispatcherTimer _networkDebounceTimer = new DispatcherTimer();
+        private bool _isInErrorState = false;
+        private static readonly TimeSpan FastRetryInterval = TimeSpan.FromSeconds(20);
         private Forms.NotifyIcon _notifyIcon;
         private Forms.ToolStripMenuItem _trayClickThroughItem;
         private Forms.ToolStripMenuItem _trayCompactItem;
@@ -70,6 +74,25 @@ namespace XDripWidget
             _timer.Interval = TimeSpan.FromMinutes(interval);
             _timer.Tick += (s, args) => FetchDataAsync();
             _timer.Start();
+
+            // Setup Network Change Detection & Debounce Timer
+            _networkDebounceTimer.Interval = TimeSpan.FromSeconds(2);
+            _networkDebounceTimer.Tick += (s, args) =>
+            {
+                _networkDebounceTimer.Stop();
+                Logger.Info("Сетевой дебаунс завершен. Запуск опроса данных...");
+                FetchDataAsync();
+            };
+
+            try
+            {
+                NetworkChange.NetworkAddressChanged += OnNetworkChanged;
+                NetworkChange.NetworkAvailabilityChanged += OnNetworkAvailabilityChanged;
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn(string.Format("Не удалось подписаться на системные события сети: {0}", ex.Message));
+            }
 
             // Initial fetch
             FetchDataAsync();
@@ -139,6 +162,7 @@ namespace XDripWidget
             contextMenu.Items.Add("О программе", null, (s, e) => Dispatcher.Invoke((Action)(() => MenuAbout_Click(this, new RoutedEventArgs()))));
             contextMenu.Items.Add(new Forms.ToolStripSeparator());
 
+            contextMenu.Items.Add("Перезагрузить виджет", null, (s, e) => Dispatcher.Invoke((Action)RestartApplication));
             contextMenu.Items.Add("Выход", null, (s, e) => Dispatcher.Invoke((Action)ConfirmAndQuit));
             _notifyIcon.ContextMenuStrip = contextMenu;
 
@@ -178,12 +202,27 @@ namespace XDripWidget
                     _lastKnownData = result.CurrentData;
                     _lastKnownHistory = result.History ?? new List<HistoryPoint>();
 
+                    if (_isInErrorState)
+                    {
+                        _isInErrorState = false;
+                        int normalInterval = Math.Max(1, _config.RefreshIntervalMinutes);
+                        _timer.Interval = TimeSpan.FromMinutes(normalInterval);
+                        Logger.Info(string.Format("Связь с сервером успешно восстановлена! Интервал таймера возвращен в штатный режим ({0} мин).", normalInterval));
+                    }
+
                     CanvasElement.UpdateData(result.CurrentData, result.History);
                     UpdateTray(result.CurrentData);
                     CheckAlerts(result.CurrentData);
                 }
                 else
                 {
+                    if (!_isInErrorState)
+                    {
+                        _isInErrorState = true;
+                        _timer.Interval = FastRetryInterval;
+                        Logger.Warn(string.Format("Сбой связи ({0}). Переход в режим быстрого повтора (Fast Retry, каждые 20 сек) до восстановления...", result.ErrorMessage));
+                    }
+
                     // Check if we have recent valid data (less than 5 minutes old)
                     double minutesSinceSuccess = _lastSuccessfulFetch != DateTime.MinValue 
                         ? (DateTime.Now - _lastSuccessfulFetch).TotalMinutes 
@@ -212,6 +251,12 @@ namespace XDripWidget
             }
             catch (Exception ex)
             {
+                if (!_isInErrorState)
+                {
+                    _isInErrorState = true;
+                    _timer.Interval = FastRetryInterval;
+                    Logger.Warn("Исключение при опросе. Включен режим быстрого повтора (20 сек).");
+                }
                 Logger.Error("Необработанная ошибка в FetchDataAsync", ex);
                 CanvasElement.SetError(ex.Message);
             }
@@ -993,7 +1038,10 @@ namespace XDripWidget
             {
                 Opacity = Math.Max(0.3, Math.Min(1.0, (100 - _config.Transparency) / 100.0));
                 int interval = Math.Max(1, _config.RefreshIntervalMinutes);
-                _timer.Interval = TimeSpan.FromMinutes(interval);
+                if (!_isInErrorState)
+                {
+                    _timer.Interval = TimeSpan.FromMinutes(interval);
+                }
                 UpdateGlobalHotkey();
                 SetAcrylicBlur(_config.AcrylicBlur);
                 FetchDataAsync();
@@ -1006,6 +1054,77 @@ namespace XDripWidget
             dlg.Owner = this;
             PositionDialogNearWidget(dlg);
             dlg.ShowDialog();
+        }
+
+        private void MenuRestart_Click(object sender, RoutedEventArgs e)
+        {
+            RestartApplication();
+        }
+
+        private void RestartApplication()
+        {
+            try
+            {
+                Logger.Info("Инициирован перезапуск виджета...");
+                string exePath = null;
+                try
+                {
+                    var mainModule = System.Diagnostics.Process.GetCurrentProcess().MainModule;
+                    if (mainModule != null)
+                    {
+                        exePath = mainModule.FileName;
+                    }
+                }
+                catch { }
+
+                if (string.IsNullOrEmpty(exePath))
+                {
+                    exePath = System.Reflection.Assembly.GetExecutingAssembly().Location;
+                }
+
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = exePath,
+                    UseShellExecute = true
+                });
+
+                _isConfirmedQuit = true;
+                Close();
+            }
+            catch (Exception ex)
+            {
+                Logger.Error("Не удалось перезапустить виджет", ex);
+                System.Windows.MessageBox.Show(
+                    "Не удалось перезапустить виджет: " + ex.Message,
+                    "Ошибка перезапуска",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+            }
+        }
+
+        private void OnNetworkChanged(object sender, EventArgs e)
+        {
+            Dispatcher.BeginInvoke((Action)(() =>
+            {
+                Logger.Info("Системное событие: изменение сетевого окружения (NetworkAddressChanged). Сброс сокетов...");
+                ApiClient.ResetClient();
+                _networkDebounceTimer.Stop();
+                _networkDebounceTimer.Start();
+            }));
+        }
+
+        private void OnNetworkAvailabilityChanged(object sender, NetworkAvailabilityEventArgs e)
+        {
+            Dispatcher.BeginInvoke((Action)(() =>
+            {
+                Logger.Info(string.Format("Системное событие: доступность сети изменилась (IsAvailable={0})", e.IsAvailable));
+                if (e.IsAvailable)
+                {
+                    ApiClient.ResetClient();
+                    _networkDebounceTimer.Stop();
+                    _networkDebounceTimer.Start();
+                }
+            }));
         }
 
         private void MenuExit_Click(object sender, RoutedEventArgs e)
@@ -1053,6 +1172,14 @@ namespace XDripWidget
 
             try
             {
+                NetworkChange.NetworkAddressChanged -= OnNetworkChanged;
+                NetworkChange.NetworkAvailabilityChanged -= OnNetworkAvailabilityChanged;
+            }
+            catch { }
+            _networkDebounceTimer.Stop();
+
+            try
+            {
                 var helper = new WindowInteropHelper(this);
                 if (helper.Handle != IntPtr.Zero)
                 {
@@ -1068,6 +1195,7 @@ namespace XDripWidget
                 _notifyIcon = null;
             }
             _timer.Stop();
+            System.Windows.Application.Current.Shutdown();
         }
     }
 }

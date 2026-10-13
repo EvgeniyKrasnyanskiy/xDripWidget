@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Net;
@@ -27,7 +27,8 @@ namespace XDripWidget
 
     public class ApiClient
     {
-        private static readonly HttpClient _httpClient;
+        private static HttpClient _httpClient;
+        private static readonly object _clientLock = new object();
 
         static ApiClient()
         {
@@ -38,13 +39,54 @@ namespace XDripWidget
                     SecurityProtocolType.Tls11 |
                     SecurityProtocolType.Tls;
                 ServicePointManager.DefaultConnectionLimit = 20;
+                ServicePointManager.DnsRefreshTimeout = 3000;
+                ServicePointManager.EnableDnsRoundRobin = true;
             }
             catch { }
 
-            _httpClient = new HttpClient
+            _httpClient = CreateHttpClient();
+        }
+
+        private static HttpClient CreateHttpClient()
+        {
+            var handler = new HttpClientHandler
+            {
+                AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate
+            };
+            return new HttpClient(handler)
             {
                 Timeout = TimeSpan.FromSeconds(15)
             };
+        }
+
+        public static void ResetClient()
+        {
+            lock (_clientLock)
+            {
+                try
+                {
+                    if (_httpClient != null)
+                    {
+                        _httpClient.CancelPendingRequests();
+                        _httpClient.Dispose();
+                    }
+                }
+                catch { }
+                _httpClient = CreateHttpClient();
+                Logger.Info("Сетевой HTTP-клиент сброшен (пул сокетов и DNS обновлены)");
+            }
+        }
+
+        private static HttpClient GetHttpClient()
+        {
+            lock (_clientLock)
+            {
+                if (_httpClient == null)
+                {
+                    _httpClient = CreateHttpClient();
+                }
+                return _httpClient;
+            }
         }
 
         private readonly JavaScriptSerializer _serializer = new JavaScriptSerializer();
@@ -57,17 +99,27 @@ namespace XDripWidget
                 bool shouldRetry = false;
                 try
                 {
+                    try
+                    {
+                        var uri = new Uri(url);
+                        var sp = ServicePointManager.FindServicePoint(uri);
+                        sp.ConnectionLeaseTimeout = 15000;
+                    }
+                    catch { }
+
+                    var client = GetHttpClient();
                     var request = new HttpRequestMessage(method, url);
                     request.Headers.ConnectionClose = true;
                     if (contentFactory != null)
                     {
                         request.Content = contentFactory();
                     }
-                    return await _httpClient.SendAsync(request).ConfigureAwait(false);
+                    return await client.SendAsync(request).ConfigureAwait(false);
                 }
                 catch (HttpRequestException ex)
                 {
                     lastEx = ex;
+                    ResetClient();
                     if (attempt == 0)
                     {
                         Logger.Warn(string.Format("HttpRequestException on {0}: {1}. Повтор через 500 мс...", url, ex.Message));
@@ -81,6 +133,7 @@ namespace XDripWidget
                 catch (TaskCanceledException ex)
                 {
                     lastEx = ex;
+                    ResetClient();
                     if (attempt == 0)
                     {
                         Logger.Warn(string.Format("Таймаут запроса к {0}. Повторная попытка...", url));
@@ -94,6 +147,7 @@ namespace XDripWidget
                 catch (Exception ex)
                 {
                     lastEx = ex;
+                    ResetClient();
                     if (attempt == 0)
                     {
                         Logger.Warn(string.Format("Ошибка запроса {0}: {1}. Повтор...", url, ex.Message));

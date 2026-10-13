@@ -132,3 +132,12 @@
 - [x] Шаг 3: В MainWindow.xaml.cs реализован 5-минутный порог отображения ошибки: при единичных микро-сбоях опрос не затирает последний сахар на экране, а ошибка выводится только при отсутствии данных > 5 минут.
 - [x] Шаг 4: В TreatmentDialog.xaml.cs добавлен Win32-вызов SetForegroundWindow, Activate и автоматическое выделение TxtInsulin.SelectAll() при вызове по горячей клавише из любого стороннего приложения.
 - [x] Шаг 5: Сборка через MSBuild, проверка записи журнала в widget_cs.log и стабильности работы.
+
+### 20. Автоматическое восстановление сети при сбоях/VPN, перезагрузка виджета из меню и отображение токена в настройках [Completed]
+- [x] Шаг 1: `ApiClient.cs` — сброс зависших сокетов/DNS через `ServicePointManager.DnsRefreshTimeout = 3000`, `ConnectionLeaseTimeout = 15000` и потокобезопасный метод `ResetClient()`.
+- [x] Шаг 2: `MainWindow.xaml.cs` — отслеживание событий ОС `NetworkChange.NetworkAddressChanged` и `NetworkChange.NetworkAvailabilityChanged`, сброс пула и немедленный опрос с дебаунсом 2с.
+- [x] Шаг 3: `MainWindow.xaml.cs` — быстрый повтор запроса (Fast Retry каждые 15–20с при ошибке связи вместо ожидания полного интервала 1–5 мин).
+- [x] Шаг 4: `MainWindow.xaml` и `MainWindow.xaml.cs` — добавление пункта «Перезагрузить виджет» в контекстное меню окна и системного трея, реализация `RestartApplication()`.
+- [x] Шаг 5: `SettingsDialog.xaml` и `SettingsDialog.xaml.cs` — кнопка-глазок для просмотра/скрытия токена API с векторной пиктограммой и синхронизацией.
+- [x] Шаг 6: Сборка через MSBuild, проверка работы и верификация.
+

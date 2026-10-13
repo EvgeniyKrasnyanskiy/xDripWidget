@@ -3,12 +3,14 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Media;
 
 namespace XDripWidget
 {
     public partial class SettingsDialog : Window
     {
         private readonly Config _config;
+        private bool _isSecretRevealed = false;
 
         public SettingsDialog(Config config)
         {
@@ -18,6 +20,7 @@ namespace XDripWidget
 
             TxtServerUrl.Text = _config.ServerUrl ?? "http://localhost:8080";
             TxtApiSecret.Password = _config.ApiSecret ?? "";
+            TxtApiSecretVisible.Text = _config.ApiSecret ?? "";
             SliderTransparency.Value = _config.Transparency;
             LblTransparency.Text = string.Format("{0}%", _config.Transparency);
             TxtInterval.Text = _config.RefreshIntervalMinutes.ToString();
@@ -186,6 +189,48 @@ namespace XDripWidget
             TxtHotkey.Text = "";
         }
 
+        private void BtnToggleSecret_Click(object sender, RoutedEventArgs e)
+        {
+            _isSecretRevealed = !_isSecretRevealed;
+            if (_isSecretRevealed)
+            {
+                TxtApiSecretVisible.Text = TxtApiSecret.Password;
+                TxtApiSecret.Visibility = Visibility.Collapsed;
+                TxtApiSecretVisible.Visibility = Visibility.Visible;
+                TxtApiSecretVisible.Focus();
+                TxtApiSecretVisible.CaretIndex = TxtApiSecretVisible.Text.Length;
+
+                PathEye.Data = Geometry.Parse("M 1,8 C 4,3 12,3 15,8 C 12,13 4,13 1,8 Z M 8,5.5 A 2.5,2.5 0 1 0 8,10.5 A 2.5,2.5 0 1 0 8,5.5 Z M 2,2 L 14,14");
+                PathEye.Stroke = new SolidColorBrush(System.Windows.Media.Color.FromRgb(56, 189, 248));
+            }
+            else
+            {
+                TxtApiSecret.Password = TxtApiSecretVisible.Text;
+                TxtApiSecretVisible.Visibility = Visibility.Collapsed;
+                TxtApiSecret.Visibility = Visibility.Visible;
+                TxtApiSecret.Focus();
+
+                PathEye.Data = Geometry.Parse("M 1,8 C 4,3 12,3 15,8 C 12,13 4,13 1,8 Z M 8,5.5 A 2.5,2.5 0 1 0 8,10.5 A 2.5,2.5 0 1 0 8,5.5 Z");
+                PathEye.Stroke = new SolidColorBrush(System.Windows.Media.Color.FromRgb(148, 163, 184));
+            }
+        }
+
+        private void TxtApiSecret_PasswordChanged(object sender, RoutedEventArgs e)
+        {
+            if (!_isSecretRevealed)
+            {
+                TxtApiSecretVisible.Text = TxtApiSecret.Password;
+            }
+        }
+
+        private void TxtApiSecretVisible_TextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e)
+        {
+            if (_isSecretRevealed)
+            {
+                TxtApiSecret.Password = TxtApiSecretVisible.Text;
+            }
+        }
+
         private void SliderTransparency_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
         {
             if (LblTransparency != null)
@@ -197,7 +242,8 @@ namespace XDripWidget
         private void BtnSave_Click(object sender, RoutedEventArgs e)
         {
             _config.ServerUrl = TxtServerUrl.Text.Trim();
-            _config.ApiSecret = TxtApiSecret.Password.Trim();
+            string apiSecret = _isSecretRevealed ? TxtApiSecretVisible.Text : TxtApiSecret.Password;
+            _config.ApiSecret = apiSecret.Trim();
             _config.Transparency = (int)SliderTransparency.Value;
 
             int interval;

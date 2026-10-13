@@ -111,6 +111,7 @@
             <MenuItem Header="Настройки…" Click="MenuSettings_Click"/>
             <MenuItem Header="О программе" Click="MenuAbout_Click"/>
             <Separator/>
+            <MenuItem Header="Перезагрузить виджет" Click="MenuRestart_Click"/>
             <MenuItem Header="Выход" Click="MenuExit_Click"/>
         </ContextMenu>
     </Window.ContextMenu>

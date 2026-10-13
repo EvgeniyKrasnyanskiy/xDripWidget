@@ -60,7 +60,18 @@
 
         <!-- API Secret -->
         <Label Grid.Row="1" Grid.Column="0" Content="API Secret / Токен:" VerticalAlignment="Center"/>
-        <PasswordBox Grid.Row="1" Grid.Column="1" x:Name="TxtApiSecret" Margin="0,4"/>
+        <DockPanel Grid.Row="1" Grid.Column="1" Margin="0,4">
+            <Button x:Name="BtnToggleSecret" Width="28" Padding="0" Click="BtnToggleSecret_Click" DockPanel.Dock="Right" Margin="6,0,0,0" ToolTip="Показать / скрыть токен">
+                <Path x:Name="PathEye"
+                      Data="M 1,8 C 4,3 12,3 15,8 C 12,13 4,13 1,8 Z M 8,5.5 A 2.5,2.5 0 1 0 8,10.5 A 2.5,2.5 0 1 0 8,5.5 Z"
+                      Stroke="#94A3B8" StrokeThickness="1.4" Fill="Transparent"
+                      Width="16" Height="16" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Button>
+            <Grid>
+                <PasswordBox x:Name="TxtApiSecret" PasswordChanged="TxtApiSecret_PasswordChanged"/>
+                <TextBox x:Name="TxtApiSecretVisible" Visibility="Collapsed" TextChanged="TxtApiSecretVisible_TextChanged"/>
+            </Grid>
+        </DockPanel>
 
         <!-- Transparency -->
         <Label Grid.Row="2" Grid.Column="0" Content="Прозрачность (0-70%):" VerticalAlignment="Center"/>

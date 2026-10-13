@@ -1,7 +1,8 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Windows;
 
 namespace XDripWidget
@@ -24,17 +25,30 @@ namespace XDripWidget
 
         private void Application_Startup(object sender, StartupEventArgs e)
         {
+            ShutdownMode = ShutdownMode.OnExplicitShutdown;
+
+            AppDomain.CurrentDomain.UnhandledException += (s, args) =>
+            {
+                Logger.Error("Критическое исключение AppDomain", args.ExceptionObject as Exception);
+            };
+
             DispatcherUnhandledException += (s, args) =>
             {
                 Logger.Error("Необработанное исключение (Unhandled Dispatcher Exception)", args.Exception);
                 args.Handled = true;
             };
 
+            TaskScheduler.UnobservedTaskException += (s, args) =>
+            {
+                Logger.Error("Необработанное исключение TaskScheduler", args.Exception);
+                args.SetObserved();
+            };
+
             bool createdNew;
             _singleInstanceMutex = new Mutex(true, "Local\\XDripWidget_SingleInstance_Mutex", out createdNew);
             if (!createdNew)
             {
-                // Silently wake up existing instance and bring to front without annoying popups
+                Logger.Info("Обнаружен уже запущенный экземпляр xDripWidget-CS. Активация существующего окна и выход дубликата.");
                 IntPtr hwnd = FindWindow(null, "xDripWidget");
                 if (hwnd != IntPtr.Zero)
                 {
@@ -48,6 +62,7 @@ namespace XDripWidget
 
             Logger.Info("=================== xDripWidget-CS запущен ===================");
             var mainWindow = new MainWindow();
+            MainWindow = mainWindow;
             mainWindow.Show();
         }
 
